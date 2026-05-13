@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Codegen — never commit generated files
+*.g.dart
+*.freezed.dart
+
+# 
+.atl
+
+#
+/test
