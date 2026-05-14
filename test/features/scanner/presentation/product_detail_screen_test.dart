@@ -1,9 +1,11 @@
 // Spec: SCANNER-UI-002 sc1, sc2, sc3, sc4, sc5, sc6, sc7
-// AD-16 + AD-18: ProductDetailScreen widget tests.
+//       SHOPPING-LIST-005 sc1, sc2, sc3
+// AD-16 + AD-18 + AD-25: ProductDetailScreen widget tests.
 //
-// Testing strategy (AD-18):
+// Testing strategy (AD-18 / AD-26):
 // Override productDetailNotifierProvider(barcode) using FakeProductDetailNotifier.
-// All 7 tests use ProviderScope with overrides.
+// Override shoppingListNotifierProvider using FakeShoppingListNotifier.
+// All tests use ProviderScope with both overrides.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +18,9 @@ import 'package:nutriguide_mobile/features/scanner/presentation/providers/produc
 import 'package:nutriguide_mobile/features/scanner/presentation/widgets/nutri_score_grade_badge.dart';
 import 'package:nutriguide_mobile/features/scanner/presentation/widgets/nutritional_info_card.dart';
 import 'package:nutriguide_mobile/features/scanner/presentation/widgets/product_header.dart';
+import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
+import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list.dart';
+import 'package:nutriguide_mobile/features/shopping_list/presentation/providers/shopping_list_notifier.dart';
 
 // ---------------------------------------------------------------------------
 // Test fixture
@@ -50,7 +55,7 @@ final _testProductNoGrade = Product(
 // ---------------------------------------------------------------------------
 // FakeProductDetailNotifier
 //
-// Allows us to seed a fixed state without running the real async build.
+// Allows us to seed a fixed ProductDetailState without running the real async build.
 // ---------------------------------------------------------------------------
 
 class FakeProductDetailNotifier extends ProductDetailNotifier {
@@ -68,14 +73,84 @@ class FakeProductDetailNotifier extends ProductDetailNotifier {
 }
 
 // ---------------------------------------------------------------------------
-// Helper — builds ProductDetailScreen with a seeded state.
+// FakeShoppingListNotifier
+//
+// Seeds ShoppingListState so shopping list provider resolves without a repo.
 // ---------------------------------------------------------------------------
 
-Widget buildSubject(ProductDetailState seedState) {
+class FakeShoppingListNotifier extends ShoppingListNotifier {
+  FakeShoppingListNotifier(this._seedState);
+
+  final ShoppingListState _seedState;
+
+  @override
+  Future<ShoppingListState> build() async => _seedState;
+
+  /// No-op addItem — avoids real repo access in tests that only need
+  /// the notifier to resolve without side-effects.
+  @override
+  Future<void> addItem(ShoppingItem item) async {
+    // State already resolved; just pretend we added.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _CapturingShoppingListNotifier
+//
+// Like FakeShoppingListNotifier but also captures the ShoppingItem passed to
+// addItem() so tests can assert the correct fields were used.
+// ---------------------------------------------------------------------------
+
+class _CapturingShoppingListNotifier extends ShoppingListNotifier {
+  _CapturingShoppingListNotifier(
+    this._seedState, {
+    required this.onAdd,
+  });
+
+  final ShoppingListState _seedState;
+  final void Function(ShoppingItem item) onAdd;
+
+  @override
+  Future<ShoppingListState> build() async => _seedState;
+
+  @override
+  Future<void> addItem(ShoppingItem item) async {
+    onAdd(item);
+    // Don't actually mutate state — the test only cares about the argument.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures for ShoppingList
+// ---------------------------------------------------------------------------
+
+final _testShoppingList = ShoppingList(
+  id: 'list-1',
+  name: 'Mi lista de compras',
+  items: const [],
+  createdAt: DateTime(2026),
+  updatedAt: DateTime(2026),
+);
+
+// ---------------------------------------------------------------------------
+// Helper — builds ProductDetailScreen with both providers overridden.
+// [shoppingListSeedState] defaults to ShoppingListData (list ready).
+// ---------------------------------------------------------------------------
+
+Widget buildSubject(
+  ProductDetailState seedState, {
+  ShoppingListState? shoppingListSeedState,
+}) {
+  final listState =
+      shoppingListSeedState ?? ShoppingListData(_testShoppingList);
+
   return ProviderScope(
     overrides: [
       productDetailNotifierProvider(_barcode).overrideWith(
         () => FakeProductDetailNotifier(seedState),
+      ),
+      shoppingListNotifierProvider.overrideWith(
+        () => FakeShoppingListNotifier(listState),
       ),
     ],
     child: const MaterialApp(
@@ -115,6 +190,9 @@ void main() {
       await tester.pumpWidget(
         buildSubject(ProductDetailData(_testProduct, isFromCache: false)),
       );
+      // First pump: product detail notifier resolves (AsyncData<ProductDetailState>).
+      // Second pump: shoppingListNotifierProvider resolves (AsyncData<ShoppingListState>).
+      await tester.pump();
       await tester.pump();
 
       expect(find.byType(ProductHeader), findsOneWidget);
@@ -170,29 +248,131 @@ void main() {
   );
 
   // ── Test 6 ──────────────────────────────────────────────────────────────
-  // Spec SCANNER-UI-002 sc7: Tap GestureDetector on disabled button → SnackBar.
+  // Spec SHOPPING-LIST-005 sc1 / SCANNER-UI-002 sc7:
+  // "Agregar a lista" button is enabled (not disabled) when shoppingListNotifierProvider resolves.
   testWidgets(
-    'tapping GestureDetector on disabled "Agregar a lista" button shows "Próximamente" snackbar',
+    'sc7 — "Agregar a lista" button is enabled when shoppingListNotifierProvider resolves',
     (tester) async {
       await tester.pumpWidget(
         buildSubject(ProductDetailData(_testProduct, isFromCache: false)),
       );
+      // pump 1: product detail notifier resolves (FakeProductDetailNotifier.build())
+      // pump 2: shopping list notifier resolves (FakeShoppingListNotifier.build())
+      await tester.pump();
       await tester.pump();
 
-      // Scroll to bring the button into view (it's below the fold).
+      // Scroll the button into view.
       await tester.scrollUntilVisible(
         find.text('Agregar a lista'),
         100,
       );
       await tester.pump();
 
-      // The disabled button is wrapped in a GestureDetector.
-      // We tap on the text directly — the GestureDetector above it intercepts
-      // because the ElevatedButton is disabled (onPressed: null).
+      // The ElevatedButton must have an active onPressed (not null).
+      final button = tester.widget<ElevatedButton>(
+        find.widgetWithText(ElevatedButton, 'Agregar a lista'),
+      );
+      expect(button.onPressed, isNotNull);
+    },
+  );
+
+  // ── Test 8 ──────────────────────────────────────────────────────────────
+  // Spec SHOPPING-LIST-005 sc1 / SCANNER-UI-002 sc7:
+  // Tapping "Agregar a lista" shows SnackBar "Agregado a Mi lista de compras".
+  testWidgets(
+    'sc7 — tapping "Agregar a lista" shows SnackBar "Agregado a Mi lista de compras"',
+    (tester) async {
+      await tester.pumpWidget(
+        buildSubject(ProductDetailData(_testProduct, isFromCache: false)),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // Scroll the button into view.
+      await tester.scrollUntilVisible(
+        find.text('Agregar a lista'),
+        100,
+      );
+      await tester.pump();
+
       await tester.tap(find.text('Agregar a lista'));
       await tester.pump();
 
-      expect(find.text('Próximamente'), findsOneWidget);
+      expect(find.text('Agregado a Mi lista de compras'), findsOneWidget);
+    },
+  );
+
+  // ── Test 9 ──────────────────────────────────────────────────────────────
+  // Spec SHOPPING-LIST-005 sc1 + sc3:
+  // Tapping "Agregar a lista" passes a ShoppingItem with correct name and barcode.
+  testWidgets(
+    'sc7 — tapping button builds ShoppingItem with product name and barcode',
+    (tester) async {
+      ShoppingItem? capturedItem;
+
+      // Use a custom FakeShoppingListNotifier that captures the addItem argument.
+      final capturingNotifier = _CapturingShoppingListNotifier(
+        ShoppingListData(_testShoppingList),
+        onAdd: (item) => capturedItem = item,
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            productDetailNotifierProvider(_barcode).overrideWith(
+              () => FakeProductDetailNotifier(
+                ProductDetailData(_testProduct, isFromCache: false),
+              ),
+            ),
+            shoppingListNotifierProvider.overrideWith(
+              () => capturingNotifier,
+            ),
+          ],
+          child: const MaterialApp(
+            home: ProductDetailScreen(barcode: _barcode),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.scrollUntilVisible(find.text('Agregar a lista'), 100);
+      await tester.pump();
+
+      await tester.tap(find.text('Agregar a lista'));
+      await tester.pump();
+
+      expect(capturedItem, isNotNull);
+      expect(capturedItem!.name, equals(_testProduct.name));
+      expect(capturedItem!.productBarcode, equals(_testProduct.barcode));
+      expect(capturedItem!.isChecked, isFalse);
+      expect(capturedItem!.quantity, isNull);
+      expect(capturedItem!.estimatedPrice, isNull);
+    },
+  );
+
+  // ── Test 10 ─────────────────────────────────────────────────────────────
+  // Spec SHOPPING-LIST-005 sc1:
+  // After tapping "Agregar a lista", user STAYS on ProductDetailScreen (no pop/navigation).
+  testWidgets(
+    'sc7 — after tapping button, user stays on ProductDetailScreen (no navigation)',
+    (tester) async {
+      await tester.pumpWidget(
+        buildSubject(ProductDetailData(_testProduct, isFromCache: false)),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.scrollUntilVisible(find.text('Agregar a lista'), 100);
+      await tester.pump();
+
+      await tester.tap(find.text('Agregar a lista'));
+      await tester.pump();
+
+      // ProductHeader is still visible — we haven't navigated away.
+      expect(find.byType(ProductHeader), findsOneWidget);
+      // The screen's AppBar title is still "Detalle del producto".
+      expect(find.text('Detalle del producto'), findsOneWidget);
     },
   );
 

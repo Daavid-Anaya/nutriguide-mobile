@@ -34,6 +34,9 @@ Future<void> main() async {
     ProviderScope(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(sharedPrefs),
+        productsBoxProvider.overrideWithValue(Hive.box('products')),
+        shoppingListsBoxProvider.overrideWithValue(Hive.box('shopping_lists')),
+        userPreferencesBoxProvider.overrideWithValue(Hive.box('user_preferences')),
       ],
       child: const App(),
     ),

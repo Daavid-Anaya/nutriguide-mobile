@@ -1,5 +1,6 @@
 // Spec: SCANNER-UI-002 sc1, sc2, sc3, sc4, sc5, sc6, sc7
-// AD-16: ProductDetailScreen — ConsumerWidget switching on AsyncValue<ProductDetailState>.
+//       SHOPPING-LIST-005 sc1, sc2, sc3
+// AD-16 + AD-25: ProductDetailScreen — ConsumerWidget switching on AsyncValue<ProductDetailState>.
 // Receives [barcode] from route path parameter.
 
 import 'package:flutter/material.dart';
@@ -12,14 +13,16 @@ import 'package:nutriguide_mobile/features/scanner/presentation/providers/produc
 import 'package:nutriguide_mobile/features/scanner/presentation/widgets/nutri_score_grade_badge.dart';
 import 'package:nutriguide_mobile/features/scanner/presentation/widgets/nutritional_info_card.dart';
 import 'package:nutriguide_mobile/features/scanner/presentation/widgets/product_header.dart';
+import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
+import 'package:nutriguide_mobile/features/shopping_list/presentation/providers/shopping_list_notifier.dart';
 
 /// Displays the full product detail for the scanned [barcode].
 ///
 /// - Uses [NutriAppBar] at the top (spec SCANNER-UI-002).
 /// - Watches [productDetailNotifierProvider(barcode)] and switches on the
 ///   [AsyncValue<ProductDetailState>] to render loading / data / error views.
-/// - The "Agregar a lista" button is permanently disabled and wrapped in a
-///   [GestureDetector] to show a "Próximamente" [SnackBar] on tap (spec sc7).
+/// - The "Agregar a lista" button calls [shoppingListNotifierProvider.addItem]
+///   and shows a SnackBar on success (spec SHOPPING-LIST-005 / SCANNER-UI-002 sc7).
 class ProductDetailScreen extends ConsumerWidget {
   const ProductDetailScreen({super.key, required this.barcode});
 
@@ -63,7 +66,11 @@ class ProductDetailScreen extends ConsumerWidget {
 // Rendered when product data is available (AsyncData + ProductDetailData).
 // ---------------------------------------------------------------------------
 
-class _ProductView extends StatelessWidget {
+/// Displays the product details and an active "Agregar a lista" button.
+///
+/// Changed from [StatelessWidget] to [ConsumerWidget] (AD-25) to watch
+/// [shoppingListNotifierProvider] for loading state and call [addItem].
+class _ProductView extends ConsumerWidget {
   const _ProductView({
     required this.product,
     required this.isFromCache,
@@ -73,7 +80,10 @@ class _ProductView extends StatelessWidget {
   final bool isFromCache;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final shoppingListAsyncState = ref.watch(shoppingListNotifierProvider);
+    final isShoppingListLoading = shoppingListAsyncState is AsyncLoading;
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(context.spacing.md),
       child: Column(
@@ -97,19 +107,36 @@ class _ProductView extends StatelessWidget {
 
           SizedBox(height: context.spacing.lg),
 
-          // ── "Agregar a lista" — disabled button + snackbar on tap ────────
-          // Spec sc7: button is permanently disabled (onPressed: null).
-          // GestureDetector intercepts taps to show "Próximamente" SnackBar.
-          GestureDetector(
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Próximamente')),
-              );
-            },
-            child: const ElevatedButton(
-              onPressed: null, // permanently disabled
-              child: Text('Agregar a lista'),
-            ),
+          // ── "Agregar a lista" — active button (AD-25, SHOPPING-LIST-005) ─
+          // When shoppingListNotifierProvider is loading: button is disabled
+          // and shows a CircularProgressIndicator. Otherwise: tapping creates
+          // a ShoppingItem from the product and calls addItem(), then shows
+          // a SnackBar confirmation. No navigation occurs after adding.
+          ElevatedButton(
+            onPressed: isShoppingListLoading
+                ? null
+                : () {
+                    final item = ShoppingItem(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: product.name,
+                      productBarcode: product.barcode,
+                    );
+                    ref
+                        .read(shoppingListNotifierProvider.notifier)
+                        .addItem(item);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Agregado a Mi lista de compras'),
+                      ),
+                    );
+                  },
+            child: isShoppingListLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Agregar a lista'),
           ),
         ],
       ),
