@@ -21,6 +21,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
 
   static const _keyName = 'user_name';
   static const _keyAvatar = 'user_avatar_url';
+  static const _keyBudget = 'grocery_budget';
 
   @override
   Future<Either<Failure, UserProfile>> getProfile() async {
@@ -30,6 +31,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
         name: _prefs.getString(_keyName) ?? 'Usuario',
         email: '',
         avatarUrl: _prefs.getString(_keyAvatar),
+        groceryBudget: _prefs.getDouble(_keyBudget),
       ));
     } catch (e) {
       return Left(CacheFailure(e.toString()));
@@ -44,6 +46,11 @@ class ProfileRepositoryImpl implements ProfileRepository {
         await _prefs.setString(_keyAvatar, profile.avatarUrl!);
       } else {
         await _prefs.remove(_keyAvatar);
+      }
+      if (profile.groceryBudget != null) {
+        await _prefs.setDouble(_keyBudget, profile.groceryBudget!);
+      } else {
+        await _prefs.remove(_keyBudget);
       }
       return const Right(null);
     } catch (e) {

@@ -5,6 +5,7 @@ import 'package:nutriguide_mobile/features/home/domain/home_repository.dart';
 import 'package:nutriguide_mobile/features/home/domain/meal.dart';
 import 'package:nutriguide_mobile/features/home/domain/meal_plan.dart';
 import 'package:nutriguide_mobile/features/home/domain/wellness_summary.dart';
+import 'package:nutriguide_mobile/features/profile/domain/profile_repository.dart';
 import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repository_impl.dart';
 
 /// Offline-first implementation of [HomeRepository].
@@ -12,8 +13,9 @@ import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repo
 /// [getWellnessSummary] computes real wellness metrics from local data:
 /// - [WellnessSummary.budgetSpent]: sum of [ShoppingItem.estimatedPrice] in the
 ///   active shopping list (null prices count as 0).
-/// - [WellnessSummary.budgetTotal]: hardcoded default 200.0 (no UserProfile
-///   budget stored in current profile implementation).
+/// - [WellnessSummary.budgetTotal]: reads from [ProfileRepository.getProfile()]
+///   via [UserProfile.groceryBudget]. Falls back to 200.0 when null or on
+///   [CacheFailure] (AD-41).
 /// - [WellnessSummary.healthScore]: average of nutriscore grades from the Hive
 ///   products box using the heuristic A=90, B=70, C=50, D=30, E=10.
 ///   Empty box → 0. Unknown/null grades are skipped.
@@ -23,16 +25,19 @@ import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repo
 /// covering breakfast, lunch, and dinner.
 ///
 /// All errors are wrapped in [Left(CacheFailure())].
-/// Spec: HOME-DATA-001 | Design: AD-28, AD-29, AD-34.
+/// Spec: HOME-DATA-001 | Design: AD-28, AD-29, AD-34, AD-41.
 class HomeRepositoryImpl implements HomeRepository {
   HomeRepositoryImpl({
     required ShoppingListRepositoryImpl shoppingListRepo,
     required Box<dynamic> productsBox,
+    required ProfileRepository profileRepo,
   })  : _shoppingListRepo = shoppingListRepo,
-        _productsBox = productsBox;
+        _productsBox = productsBox,
+        _profileRepo = profileRepo;
 
   final ShoppingListRepositoryImpl _shoppingListRepo;
   final Box<dynamic> _productsBox;
+  final ProfileRepository _profileRepo;
 
   /// Nutriscore grade → health score heuristic (AD-29).
   static const _nutriScoreMap = {
@@ -59,8 +64,12 @@ class HomeRepositoryImpl implements HomeRepository {
         ),
       );
 
-      // 2. Budget total — default 200.0 (no UserProfile.groceryBudget persisted yet)
-      const budgetTotal = _defaultBudgetTotal;
+      // 2. Budget total — read from UserProfile.groceryBudget, fallback 200.0 (AD-41)
+      final profileResult = await _profileRepo.getProfile();
+      final budgetTotal = profileResult.fold(
+        (_) => _defaultBudgetTotal,
+        (profile) => profile.groceryBudget ?? _defaultBudgetTotal,
+      );
 
       // 3. Health score from Hive products box
       final healthScore = _computeHealthScore();

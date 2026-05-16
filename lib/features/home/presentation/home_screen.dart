@@ -1,9 +1,11 @@
 // Spec: HOME-UI-001 sc1–sc4
-// Design: AD-31, AD-33, AD-35
+// Design: AD-31, AD-33, AD-35, AD-42
 // TDD: T-18 [GREEN] — Replaces placeholder with full ConsumerWidget dashboard.
+// TDD: T-18 [GREEN] — Wires onTap on HomeHeader → context.go(Routes.profile).
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:nutriguide_mobile/core/extensions/context_extensions.dart';
 import 'package:nutriguide_mobile/core/theme/app_spacing.dart';
 import 'package:nutriguide_mobile/core/widgets/loading_indicator.dart';
@@ -16,6 +18,7 @@ import 'package:nutriguide_mobile/features/home/presentation/widgets/home_header
 import 'package:nutriguide_mobile/features/home/presentation/widgets/todays_plan_section.dart';
 import 'package:nutriguide_mobile/features/home/presentation/widgets/wellness_budget_card.dart';
 import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
+import 'package:nutriguide_mobile/router/route_constants.dart';
 
 /// Full Home screen — wellness dashboard.
 ///
@@ -102,7 +105,11 @@ class _DashboardView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // ── Custom header (no AppBar — AD-31) ────────────────────────
-            HomeHeader(avatarUrl: profile.avatarUrl),
+            HomeHeader(
+              avatarUrl: profile.avatarUrl,
+              // AD-42: inject navigation callback; pure widget, no router dep.
+              onTap: () => context.go(Routes.profile),
+            ),
             const SizedBox(height: AppSpacing.lg),
 
             // ── Greeting section ─────────────────────────────────────────

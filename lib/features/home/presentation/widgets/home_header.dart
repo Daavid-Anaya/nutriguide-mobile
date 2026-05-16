@@ -1,6 +1,8 @@
 // Spec: HOME-UI-002 sc1–sc4
 // Design: AD-32 — CachedNetworkImage + Icon(Icons.person) fallback in CircleAvatar. No bell icon (AD-30).
+// Design: AD-42 — Optional onTap callback wraps avatar in GestureDetector for profile navigation.
 // TDD: T-08 [GREEN] — Implements HomeHeader to pass T-07 tests.
+// TDD: T-16 [GREEN] — Adds VoidCallback? onTap to pass T-15 tests.
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -20,16 +22,27 @@ class HomeHeader extends StatelessWidget {
   const HomeHeader({
     super.key,
     this.avatarUrl,
+    this.onTap,
   });
 
   /// The user's avatar URL. When null, shows [Icons.person] fallback.
   final String? avatarUrl;
 
+  /// Optional tap callback. When non-null, the avatar is wrapped in a
+  /// [GestureDetector] — typically used to navigate to the profile screen.
+  ///
+  /// Design: AD-42 — pure widget; the screen injects the callback.
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
+    Widget avatar = _buildAvatar(context);
+    if (onTap != null) {
+      avatar = GestureDetector(onTap: onTap, child: avatar);
+    }
     return Row(
       children: [
-        _buildAvatar(context),
+        avatar,
         const SizedBox(width: AppSpacing.md),
         Text(
           'NutriGuide',

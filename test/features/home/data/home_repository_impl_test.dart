@@ -1,5 +1,6 @@
 // Spec: HOME-DATA-001 sc1–sc5
 // TDD: T-03 [RED] — Tests FAIL until home_repository_impl.dart is created (T-04).
+// TDD: T-19 [RED] — Tests for HomeRepositoryImpl budget wiring via ProfileRepository.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
@@ -8,6 +9,8 @@ import 'package:mocktail/mocktail.dart';
 import 'package:nutriguide_mobile/core/error/failure.dart';
 import 'package:nutriguide_mobile/features/home/data/home_repository_impl.dart';
 import 'package:nutriguide_mobile/features/home/domain/meal.dart';
+import 'package:nutriguide_mobile/features/profile/domain/profile_repository.dart';
+import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
 import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repository_impl.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list.dart';
@@ -19,6 +22,8 @@ class _MockShoppingListRepo extends Mock
     implements ShoppingListRepositoryImpl {}
 
 class _MockBox extends Mock implements Box<dynamic> {}
+
+class _MockProfileRepository extends Mock implements ProfileRepository {}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -47,14 +52,27 @@ Map<String, dynamic> _productMap({required String? nutriscoreGrade}) => {
 void main() {
   late _MockShoppingListRepo mockShoppingListRepo;
   late _MockBox mockProductsBox;
+  late _MockProfileRepository mockProfileRepo;
   late HomeRepositoryImpl repository;
+
+  setUpAll(() {
+    registerFallbackValue(
+      const UserProfile(id: '', name: '', email: ''),
+    );
+  });
 
   setUp(() {
     mockShoppingListRepo = _MockShoppingListRepo();
     mockProductsBox = _MockBox();
+    mockProfileRepo = _MockProfileRepository();
+    // Default: profile returns no groceryBudget → budgetTotal falls back to 200.0
+    when(() => mockProfileRepo.getProfile()).thenAnswer(
+      (_) async => const Right(UserProfile(id: '', name: 'Usuario', email: '')),
+    );
     repository = HomeRepositoryImpl(
       shoppingListRepo: mockShoppingListRepo,
       productsBox: mockProductsBox,
+      profileRepo: mockProfileRepo,
     );
   });
 
@@ -155,6 +173,113 @@ void main() {
         (_) => fail('Expected Left but got Right'),
       );
     });
+
+    // T-19: reads groceryBudget from profile for budgetTotal
+    test(
+      'T-19 — reads groceryBudget from profile and uses it as budgetTotal',
+      () async {
+        when(() => mockShoppingListRepo.getOrCreateDefaultList()).thenAnswer(
+          (_) async => Right(_list(items: [])),
+        );
+        when(() => mockProductsBox.isEmpty).thenReturn(true);
+        when(() => mockProfileRepo.getProfile()).thenAnswer(
+          (_) async => Right(
+            const UserProfile(
+              id: '',
+              name: 'Usuario',
+              email: '',
+              groceryBudget: 350.0,
+            ),
+          ),
+        );
+
+        final result = await repository.getWellnessSummary();
+
+        expect(result.isRight(), isTrue);
+        result.fold(
+          (_) => fail('Expected Right but got Left'),
+          (summary) => expect(summary.budgetTotal, equals(350.0)),
+        );
+      },
+    );
+
+    // T-19: falls back to 200.0 when groceryBudget is null
+    test(
+      'T-19 — falls back to 200.0 when profile.groceryBudget is null',
+      () async {
+        when(() => mockShoppingListRepo.getOrCreateDefaultList()).thenAnswer(
+          (_) async => Right(_list(items: [])),
+        );
+        when(() => mockProductsBox.isEmpty).thenReturn(true);
+        when(() => mockProfileRepo.getProfile()).thenAnswer(
+          (_) async => const Right(
+            UserProfile(id: '', name: 'Usuario', email: ''),
+          ),
+        );
+
+        final result = await repository.getWellnessSummary();
+
+        expect(result.isRight(), isTrue);
+        result.fold(
+          (_) => fail('Expected Right but got Left'),
+          (summary) => expect(summary.budgetTotal, equals(200.0)),
+        );
+      },
+    );
+
+    // T-19: falls back to 200.0 when profileRepo returns Left failure
+    test(
+      'T-19 — falls back to 200.0 when profileRepo returns Left(CacheFailure)',
+      () async {
+        when(() => mockShoppingListRepo.getOrCreateDefaultList()).thenAnswer(
+          (_) async => Right(_list(items: [])),
+        );
+        when(() => mockProductsBox.isEmpty).thenReturn(true);
+        when(() => mockProfileRepo.getProfile()).thenAnswer(
+          (_) async => const Left(CacheFailure('no profile')),
+        );
+
+        final result = await repository.getWellnessSummary();
+
+        expect(result.isRight(), isTrue);
+        result.fold(
+          (_) => fail('Expected Right but got Left'),
+          (summary) => expect(summary.budgetTotal, equals(200.0)),
+        );
+      },
+    );
+
+    // T-19: budgetSpent calculation is unchanged by profile wiring
+    test(
+      'T-19 — budgetSpent calculation is unchanged when profileRepo is wired',
+      () async {
+        when(() => mockShoppingListRepo.getOrCreateDefaultList()).thenAnswer(
+          (_) async => Right(
+            _list(items: [
+              _item(id: 'i1', price: 42.5),
+              _item(id: 'i2', price: null),
+            ]),
+          ),
+        );
+        when(() => mockProductsBox.isEmpty).thenReturn(true);
+        when(() => mockProfileRepo.getProfile()).thenAnswer(
+          (_) async => const Right(
+            UserProfile(id: '', name: 'Usuario', email: '', groceryBudget: 300.0),
+          ),
+        );
+
+        final result = await repository.getWellnessSummary();
+
+        expect(result.isRight(), isTrue);
+        result.fold(
+          (_) => fail('Expected Right but got Left'),
+          (summary) {
+            expect(summary.budgetSpent, equals(42.5));
+            expect(summary.budgetTotal, equals(300.0));
+          },
+        );
+      },
+    );
   });
 
   // ---------------------------------------------------------------------------

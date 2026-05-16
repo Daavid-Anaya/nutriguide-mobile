@@ -98,6 +98,85 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
+  // PROFILE-PERSIST-001 sc1–sc4 — grocery_budget persistence (T-01)
+  // ---------------------------------------------------------------------------
+  group('grocery_budget persistence', () {
+    test('saves groceryBudget to SharedPreferences', () async {
+      const profile = UserProfile(
+        id: '',
+        name: 'Ana',
+        email: '',
+        groceryBudget: 350.0,
+      );
+
+      await repository.updateProfile(profile);
+      final result = await repository.getProfile();
+
+      result.fold(
+        (_) => fail('Expected Right but got Left'),
+        (loaded) => expect(loaded.groceryBudget, equals(350.0)),
+      );
+    });
+
+    test('loads null groceryBudget when key absent', () async {
+      // Fresh prefs (setMockInitialValues({}) in setUp)
+      final result = await repository.getProfile();
+
+      result.fold(
+        (_) => fail('Expected Right but got Left'),
+        (profile) => expect(profile.groceryBudget, isNull),
+      );
+    });
+
+    test('removes groceryBudget key when null is passed', () async {
+      // Save 350.0 first
+      await repository.updateProfile(const UserProfile(
+        id: '',
+        name: 'Ana',
+        email: '',
+        groceryBudget: 350.0,
+      ));
+      // Now update with null budget
+      await repository.updateProfile(const UserProfile(
+        id: '',
+        name: 'Ana',
+        email: '',
+        groceryBudget: null,
+      ));
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getDouble('grocery_budget'), isNull);
+    });
+
+    test('preserves existing name/avatarUrl when updating groceryBudget', () async {
+      // Save name + avatarUrl first
+      await repository.updateProfile(const UserProfile(
+        id: '',
+        name: 'Ana',
+        email: '',
+        avatarUrl: 'https://example.com/ana.jpg',
+      ));
+      // Now update with same profile + new budget
+      await repository.updateProfile(const UserProfile(
+        id: '',
+        name: 'Ana',
+        email: '',
+        avatarUrl: 'https://example.com/ana.jpg',
+        groceryBudget: 350.0,
+      ));
+      final result = await repository.getProfile();
+
+      result.fold(
+        (_) => fail('Expected Right but got Left'),
+        (profile) {
+          expect(profile.name, equals('Ana'));
+          expect(profile.avatarUrl, equals('https://example.com/ana.jpg'));
+          expect(profile.groceryBudget, equals(350.0));
+        },
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // PROFILE-DATA-001 sc4 — CacheFailure on SharedPreferences error
   // Uses a fake SharedPreferences implementation that always throws.
   // ---------------------------------------------------------------------------

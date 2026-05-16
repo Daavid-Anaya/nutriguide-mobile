@@ -1,6 +1,7 @@
 // Spec: HOME-UI-001 sc1–sc4
-// Design: AD-31, AD-33, AD-35
+// Design: AD-31, AD-33, AD-35, AD-42
 // TDD: T-17 [RED] → T-18 [GREEN] — Replaces placeholder tests with full HomeScreen integration tests.
+// TDD: T-17 [RED] — HomeScreen passes onTap to HomeHeader (GestureDetector present in data state).
 //
 // Testing strategy (AD-18 / AD-26):
 // Override homeNotifierProvider via FakeHomeNotifier that returns a preset HomeState.
@@ -222,6 +223,27 @@ void main() {
           findsOneWidget,
         );
         expect(find.byType(HomeHeader), findsNothing);
+      },
+    );
+
+    // ── T-17: HomeHeader receives onTap in data state ─────────────────────
+    // When HomeData is active, the HomeHeader avatar must be wrapped in a
+    // GestureDetector (injected via onTap: () => context.go(Routes.profile)).
+    testWidgets(
+      'HomeHeader receives onTap in data state — GestureDetector is present inside HomeHeader',
+      (tester) async {
+        await tester.pumpWidget(buildSubject(_testHomeData));
+        await tester.pump();
+
+        // The GestureDetector is the avatar's tap area injected by HomeScreen,
+        // found as a descendant of the HomeHeader widget.
+        expect(
+          find.descendant(
+            of: find.byType(HomeHeader),
+            matching: find.byType(GestureDetector),
+          ),
+          findsOneWidget,
+        );
       },
     );
 

@@ -1,5 +1,6 @@
 // Spec: HOME-UI-002 sc1–sc4
 // TDD: T-07 [RED] — HomeHeader widget tests (written before implementation exists).
+// TDD: T-15 [RED] — HomeHeader onTap callback tests.
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -11,12 +12,13 @@ import 'package:nutriguide_mobile/features/home/presentation/widgets/home_header
 Future<void> pumpHeader(
   WidgetTester tester, {
   String? avatarUrl,
+  VoidCallback? onTap,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
       theme: AppTheme.light,
       home: Scaffold(
-        body: HomeHeader(avatarUrl: avatarUrl),
+        body: HomeHeader(avatarUrl: avatarUrl, onTap: onTap),
       ),
     ),
   );
@@ -68,6 +70,31 @@ void main() {
         expect(find.byIcon(Icons.notifications_outlined), findsNothing);
         expect(find.byIcon(Icons.notification_add), findsNothing);
         expect(find.byIcon(Icons.doorbell), findsNothing);
+      },
+    );
+
+    // T-15: onTap callback is called when GestureDetector is tapped
+    testWidgets(
+      'calls onTap callback when avatar is tapped (onTap provided)',
+      (tester) async {
+        var called = false;
+        await pumpHeader(tester, avatarUrl: null, onTap: () { called = true; });
+
+        expect(find.byType(GestureDetector), findsOneWidget);
+        await tester.tap(find.byType(GestureDetector));
+        await tester.pump();
+
+        expect(called, isTrue);
+      },
+    );
+
+    // T-15: no GestureDetector when onTap is null
+    testWidgets(
+      'has no GestureDetector when onTap is null',
+      (tester) async {
+        await pumpHeader(tester, avatarUrl: null);
+
+        expect(find.byType(GestureDetector), findsNothing);
       },
     );
   });
