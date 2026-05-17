@@ -1,41 +1,61 @@
+import 'dart:async';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nutriguide_mobile/features/auth/data/auth_providers.dart';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:nutriguide_mobile/features/auth/domain/auth_repository.dart';
 
-part 'auth_notifier.g.dart';
+/// Manages authentication state reactively via Supabase's auth stream.
+///
+/// State: `AsyncValue<User?>` — `User` when authenticated, `null` when not.
+/// Listens to `authStateChanges()` for reactive updates.
+class AuthNotifier extends AsyncNotifier<User?> {
+  AuthRepository get _repo => ref.read(authRepositoryProvider);
+  StreamSubscription<User?>? _subscription;
 
-/// Riverpod async notifier that manages the JWT auth state.
-///
-/// State is `String?` where:
-/// - `null`        → unauthenticated
-/// - non-null      → the stored JWT token (authenticated)
-///
-/// Lifecycle:
-/// 1. `build()` starts in [AsyncLoading] while reading from [SecureStorageService].
-/// 2. Resolves to [AsyncData(token)] if a token is stored, otherwise [AsyncData(null)].
-/// 3. [login] writes the token to secure storage and updates state to [AsyncData(token)].
-/// 4. [logout] deletes the token from secure storage and updates state to [AsyncData(null)].
-///
-/// The notifier does NOT depend on [AuthInterceptor] directly — the interceptor
-/// is wired to read auth state via a plain `() => String?` callback in main.dart (T-19).
-@riverpod
-class AuthNotifier extends _$AuthNotifier {
   @override
-  Future<String?> build() async {
-    final storageService = ref.read(secureStorageServiceProvider);
-    return storageService.readToken();
+  Future<User?> build() async {
+    _subscription?.cancel();
+    _subscription = _repo.authStateChanges().listen((user) {
+      state = AsyncData(user);
+    });
+    ref.onDispose(() => _subscription?.cancel());
+    return _repo.currentUser;
   }
 
-  /// Stores [token] in secure storage and transitions auth state to authenticated.
-  Future<void> login(String token) async {
-    final storageService = ref.read(secureStorageServiceProvider);
-    await storageService.writeToken(token);
-    state = AsyncData(token);
+  Future<void> signInWithEmail(String email, String password) async {
+    state = const AsyncLoading();
+    final result = await _repo.signInWithEmail(email, password);
+    state = result.fold(
+      (failure) => AsyncError(failure.message, StackTrace.current),
+      (user) => AsyncData(user),
+    );
   }
 
-  /// Clears the stored token and transitions auth state to unauthenticated.
-  Future<void> logout() async {
-    final storageService = ref.read(secureStorageServiceProvider);
-    await storageService.deleteToken();
-    state = const AsyncData(null);
+  Future<void> signUp({
+    required String email,
+    required String password,
+    required String name,
+  }) async {
+    state = const AsyncLoading();
+    final result =
+        await _repo.signUp(email: email, password: password, name: name);
+    state = result.fold(
+      (failure) => AsyncError(failure.message, StackTrace.current),
+      (user) => AsyncData(user),
+    );
+  }
+
+  Future<void> signOut() async {
+    final result = await _repo.signOut();
+    result.fold(
+      (failure) => state = AsyncError(failure.message, StackTrace.current),
+      (_) => state = const AsyncData(null),
+    );
   }
 }
+
+/// Provider for [AuthNotifier].
+/// Declared manually (no @riverpod codegen) to support StreamSubscription lifecycle.
+final authNotifierProvider =
+    AsyncNotifierProvider<AuthNotifier, User?>(AuthNotifier.new);

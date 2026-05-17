@@ -8,15 +8,15 @@ import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:nutriguide_mobile/core/error/failure.dart';
 import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_providers.dart';
-import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repository_impl.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
+import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_repository.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list.dart';
 import 'package:nutriguide_mobile/features/shopping_list/presentation/providers/shopping_list_notifier.dart';
 
 // ---------------------------------------------------------------------------
 // Mock + Fake (required by mocktail for any() with custom types)
 // ---------------------------------------------------------------------------
-class MockShoppingListRepo extends Mock implements ShoppingListRepositoryImpl {}
+class MockShoppingListRepo extends Mock implements ShoppingListRepository {}
 
 /// Fake used to register a fallback value for [ShoppingList] with mocktail.
 /// Required whenever `any()` is used as an argument matcher for a parameter

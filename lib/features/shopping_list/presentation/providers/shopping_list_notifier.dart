@@ -3,8 +3,8 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_providers.dart';
-import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repository_impl.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
+import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_repository.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list.dart';
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ final shoppingListNotifierProvider =
 
 /// Manages the active [ShoppingList] state.
 ///
-/// Calls [ShoppingListRepositoryImpl.getOrCreateDefaultList] on [build],
+/// Calls [ShoppingListRepository.getOrCreateDefaultList] on [build],
 /// guaranteeing the state always resolves to [ShoppingListData] (the
 /// auto-create ensures [ShoppingListEmpty] is only returned on repo failure).
 ///
@@ -59,7 +59,7 @@ final shoppingListNotifierProvider =
 ///
 /// Spec: SHOPPING-LIST-006 | Design: AD-21.
 class ShoppingListNotifier extends AsyncNotifier<ShoppingListState> {
-  ShoppingListRepositoryImpl get _repo =>
+  ShoppingListRepository get _repo =>
       ref.read(shoppingListRepositoryProvider);
 
   @override

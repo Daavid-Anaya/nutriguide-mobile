@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nutriguide_mobile/features/auth/presentation/login_screen.dart';
 import 'package:nutriguide_mobile/features/auth/presentation/providers/auth_notifier.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nutriguide_mobile/features/auth/presentation/register_screen.dart';
 import 'package:nutriguide_mobile/features/home/presentation/home_screen.dart';
 import 'package:nutriguide_mobile/features/profile/presentation/profile_screen.dart';
@@ -48,7 +49,7 @@ String? evaluateRedirect({
 // Riverpod → Listenable bridge
 // ---------------------------------------------------------------------------
 
-/// A [ChangeNotifier] that watches Riverpod's [authProvider] and calls
+/// A [ChangeNotifier] that watches Riverpod's [authNotifierProvider] and calls
 /// [notifyListeners] whenever the auth state changes.
 ///
 /// GoRouter requires a [Listenable] for its [GoRouter.refreshListenable] so
@@ -56,9 +57,9 @@ String? evaluateRedirect({
 /// [ChangeNotifier] is the canonical bridge between Riverpod and GoRouter.
 class _RouterChangeNotifier extends ChangeNotifier {
   _RouterChangeNotifier(this._ref) {
-    // Listen to authProvider changes and notify GoRouter to re-evaluate redirects.
-    _ref.listen<AsyncValue<String?>>(
-      authProvider,
+    // Listen to authNotifierProvider changes and notify GoRouter to re-evaluate redirects.
+    _ref.listen<AsyncValue<User?>>(
+      authNotifierProvider,
       (_, _) => notifyListeners(),
     );
   }
@@ -93,9 +94,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: Routes.home,
     refreshListenable: notifier,
     redirect: (context, state) {
-      final authState = ref.read(authProvider);
+      final authState = ref.read(authNotifierProvider);
       // hasValue: the async build() has completed (not loading/error).
-      // value != null: a JWT token is stored (authenticated).
+      // value != null: a Supabase User is present (authenticated).
       final isAuthenticated = authState.hasValue && authState.value != null;
       return evaluateRedirect(
         isAuthenticated: isAuthenticated,

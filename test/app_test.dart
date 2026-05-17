@@ -7,8 +7,8 @@
 //
 // Strategy:
 //   - Override `appRouterProvider` with a stub GoRouter that renders a simple
-//     Text widget on '/'. This avoids real secure storage reads (authProvider).
-//   - Override `authProvider` with AsyncData(null) so the router redirect
+//     Text widget on '/'. This avoids real Supabase calls (authNotifierProvider).
+//   - Override `authNotifierProvider` with AsyncData(null) so the router redirect
 //     guard stays predictable (unauthenticated → stays on /login stub).
 //   - Use ProviderScope(overrides: [...]) wrapper for all widget tests.
 
@@ -19,6 +19,7 @@ import 'package:go_router/go_router.dart';
 import 'package:nutriguide_mobile/app.dart';
 import 'package:nutriguide_mobile/features/auth/presentation/providers/auth_notifier.dart';
 import 'package:nutriguide_mobile/router/app_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ---------------------------------------------------------------------------
 // Stub GoRouter — renders a Text on every route so we can pump the tree
@@ -46,20 +47,20 @@ GoRouter _stubRouter() {
 Widget _buildApp() {
   return ProviderScope(
     overrides: [
-      // Provide a stub router — avoids real authProvider reads inside GoRouter.
+      // Provide a stub router — avoids real authNotifierProvider reads inside GoRouter.
       appRouterProvider.overrideWithValue(_stubRouter()),
-      // Override authProvider so its build() is never called (no secure storage).
-      authProvider.overrideWith(() => _StubAuthNotifier()),
+      // Override authNotifierProvider so its build() is never called (no Supabase).
+      authNotifierProvider.overrideWith(() => _StubAuthNotifier()),
     ],
     child: const App(),
   );
 }
 
 /// Stub notifier — always returns AsyncData(null) (unauthenticated), never
-/// reads secure storage.
+/// calls Supabase.
 class _StubAuthNotifier extends AuthNotifier {
   @override
-  Future<String?> build() async => null;
+  Future<User?> build() async => null;
 }
 
 // ---------------------------------------------------------------------------

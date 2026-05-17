@@ -86,6 +86,12 @@ void main() {
       await tester.pump();
       expect(find.text('Editar perfil'), findsOneWidget);
     });
+
+    testWidgets('shows sign-out button in data view', (tester) async {
+      await tester.pumpWidget(buildSubject(ProfileData(profile: testProfile)));
+      await tester.pump();
+      expect(find.text('Cerrar sesión'), findsOneWidget);
+    });
   });
 
   // ── T-10: Editing state (form) ─────────────────────────────────────────────

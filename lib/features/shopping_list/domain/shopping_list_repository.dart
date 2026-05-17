@@ -28,4 +28,10 @@ abstract class ShoppingListRepository {
   ///
   /// Returns [CacheFailure] when the list does not exist.
   Future<Either<Failure, void>> deleteList(String id);
+
+  /// Returns the first existing list, or creates and saves a default one.
+  ///
+  /// Auto-creates a default list when no lists exist.
+  /// Design: AD-50 — promotes this method from impl-only to the abstract contract.
+  Future<Either<Failure, ShoppingList>> getOrCreateDefaultList();
 }

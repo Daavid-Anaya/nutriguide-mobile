@@ -76,6 +76,7 @@ class ShoppingListRepositoryImpl implements ShoppingListRepository {
   /// Auto-creates `"Mi lista de compras"` when the box is empty.
   /// The new list's [ShoppingList.id] is generated from the current epoch
   /// milliseconds — no external UUID package required (AD-20).
+  @override
   Future<Either<Failure, ShoppingList>> getOrCreateDefaultList() async {
     final allResult = await getAllLists();
     return allResult.fold(

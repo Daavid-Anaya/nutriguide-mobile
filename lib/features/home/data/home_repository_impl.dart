@@ -6,7 +6,7 @@ import 'package:nutriguide_mobile/features/home/domain/meal.dart';
 import 'package:nutriguide_mobile/features/home/domain/meal_plan.dart';
 import 'package:nutriguide_mobile/features/home/domain/wellness_summary.dart';
 import 'package:nutriguide_mobile/features/profile/domain/profile_repository.dart';
-import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repository_impl.dart';
+import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_repository.dart';
 
 /// Offline-first implementation of [HomeRepository].
 ///
@@ -25,17 +25,17 @@ import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repo
 /// covering breakfast, lunch, and dinner.
 ///
 /// All errors are wrapped in [Left(CacheFailure())].
-/// Spec: HOME-DATA-001 | Design: AD-28, AD-29, AD-34, AD-41.
+/// Spec: HOME-DATA-001 | Design: AD-28, AD-29, AD-34, AD-41, AD-50.
 class HomeRepositoryImpl implements HomeRepository {
   HomeRepositoryImpl({
-    required ShoppingListRepositoryImpl shoppingListRepo,
+    required ShoppingListRepository shoppingListRepo,
     required Box<dynamic> productsBox,
     required ProfileRepository profileRepo,
   })  : _shoppingListRepo = shoppingListRepo,
         _productsBox = productsBox,
         _profileRepo = profileRepo;
 
-  final ShoppingListRepositoryImpl _shoppingListRepo;
+  final ShoppingListRepository _shoppingListRepo;
   final Box<dynamic> _productsBox;
   final ProfileRepository _profileRepo;
 

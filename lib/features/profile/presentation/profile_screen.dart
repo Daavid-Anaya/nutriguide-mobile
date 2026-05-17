@@ -1,11 +1,13 @@
-// Spec: PROFILE-UI-001, PROFILE-UI-002, PROFILE-UI-003
+// Spec: PROFILE-UI-001, PROFILE-UI-002, PROFILE-UI-003, AUTH-SIGNOUT-001
 // Design: AD-38 (5 states), AD-39 (HookConsumerWidget for form), AD-43 (avatarUrl as text field)
 // TDD: T-12 [GREEN] — Full ProfileScreen implementation replacing 18-line placeholder.
+// TDD: Phase 6 [GREEN] — Added sign-out button.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:nutriguide_mobile/features/auth/presentation/providers/auth_notifier.dart';
 import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
 import 'package:nutriguide_mobile/features/profile/presentation/providers/profile_notifier.dart';
 import 'package:nutriguide_mobile/features/profile/presentation/widgets/profile_avatar.dart';
@@ -52,6 +54,8 @@ class ProfileScreen extends ConsumerWidget {
               profile: profile,
               onEdit: () =>
                   ref.read(profileNotifierProvider.notifier).startEdit(),
+              onSignOut: () =>
+                  ref.read(authNotifierProvider.notifier).signOut(),
             ),
           ProfileEditing(:final profile) => _ProfileForm(
               profile: profile,
@@ -81,10 +85,15 @@ class ProfileScreen extends ConsumerWidget {
 
 // ── Read-only data view ────────────────────────────────────────────────────────
 class _ProfileDataView extends StatelessWidget {
-  const _ProfileDataView({required this.profile, required this.onEdit});
+  const _ProfileDataView({
+    required this.profile,
+    required this.onEdit,
+    required this.onSignOut,
+  });
 
   final UserProfile profile;
   final VoidCallback onEdit;
+  final VoidCallback onSignOut;
 
   @override
   Widget build(BuildContext context) {
@@ -115,6 +124,18 @@ class _ProfileDataView extends StatelessWidget {
             child: ElevatedButton(
               onPressed: onEdit,
               child: const Text('Editar perfil'),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: onSignOut,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
+              ),
+              child: const Text('Cerrar sesión'),
             ),
           ),
         ],

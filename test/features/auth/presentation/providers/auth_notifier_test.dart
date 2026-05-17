@@ -1,152 +1,129 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:nutriguide_mobile/core/error/failure.dart';
+import 'package:nutriguide_mobile/features/auth/domain/auth_repository.dart';
 import 'package:nutriguide_mobile/features/auth/data/auth_providers.dart';
-import 'package:nutriguide_mobile/features/auth/data/secure_storage_service.dart';
-
-// NOTE: The import below will fail until T-16 (build_runner generates auth_notifier.g.dart).
-// These tests are intentionally TDD "red" pre-codegen. They will turn green once
-// `dart run build_runner build --delete-conflicting-outputs` is executed.
 import 'package:nutriguide_mobile/features/auth/presentation/providers/auth_notifier.dart';
 
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
+class MockAuthRepository extends Mock implements AuthRepository {}
 
-class MockSecureStorageService extends Mock implements SecureStorageService {}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Creates a [ProviderContainer] with [SecureStorageService] overridden by the
-/// provided mock. Registers [addTearDown] automatically.
-ProviderContainer makeContainer(MockSecureStorageService mockStorage) {
-  final container = ProviderContainer(
-    overrides: [
-      secureStorageServiceProvider.overrideWithValue(mockStorage),
-    ],
+// Create a fake User for tests
+User _createFakeUser({String id = 'user-123', String email = 'test@test.com'}) {
+  return User(
+    id: id,
+    appMetadata: {},
+    userMetadata: {'name': 'Test User'},
+    aud: 'authenticated',
+    createdAt: DateTime.now().toIso8601String(),
+    email: email,
   );
-  addTearDown(container.dispose);
-  return container;
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 void main() {
-  group('AuthNotifier', () {
-    late MockSecureStorageService mockStorage;
+  late MockAuthRepository mockRepo;
+  late ProviderContainer container;
+  late StreamController<User?> authStreamController;
 
-    setUp(() {
-      mockStorage = MockSecureStorageService();
+  setUp(() {
+    mockRepo = MockAuthRepository();
+    authStreamController = StreamController<User?>.broadcast();
+
+    when(() => mockRepo.authStateChanges())
+        .thenAnswer((_) => authStreamController.stream);
+
+    container = ProviderContainer(overrides: [
+      authRepositoryProvider.overrideWithValue(mockRepo),
+    ]);
+  });
+
+  tearDown(() {
+    container.dispose();
+    authStreamController.close();
+  });
+
+  group('AuthNotifier', () {
+    test('build returns User when session is active', () async {
+      final fakeUser = _createFakeUser();
+      when(() => mockRepo.currentUser).thenReturn(fakeUser);
+      final user = await container.read(authNotifierProvider.future);
+      expect(user, isNotNull);
+      expect(user?.id, 'user-123');
     });
 
-    // AUTH-001 sc1 — Token persisted across app restarts
-    test(
-      'AUTH-001 sc1: build() resolves to stored token when one exists',
-      () async {
-        when(() => mockStorage.readToken())
-            .thenAnswer((_) async => 'stored-jwt-token');
+    test('build returns null when no session', () async {
+      when(() => mockRepo.currentUser).thenReturn(null);
+      final user = await container.read(authNotifierProvider.future);
+      expect(user, isNull);
+    });
 
-        final container = makeContainer(mockStorage);
+    test('signInWithEmail on success updates state to User', () async {
+      final fakeUser = _createFakeUser();
+      when(() => mockRepo.currentUser).thenReturn(null);
+      when(() => mockRepo.signInWithEmail(any(), any()))
+          .thenAnswer((_) async => Right(fakeUser));
 
-        final token = await container.read(authProvider.future);
+      await container.read(authNotifierProvider.future);
+      await container
+          .read(authNotifierProvider.notifier)
+          .signInWithEmail('test@test.com', 'password123');
 
-        expect(token, equals('stored-jwt-token'));
-        verify(() => mockStorage.readToken()).called(1);
-      },
-    );
+      final state = container.read(authNotifierProvider);
+      expect(state.value, isNotNull);
+      expect(state.value?.id, 'user-123');
+    });
 
-    test(
-      'AUTH-001 sc1: build() resolves to null when no token is stored',
-      () async {
-        when(() => mockStorage.readToken()).thenAnswer((_) async => null);
+    test('signInWithEmail on failure sets error', () async {
+      when(() => mockRepo.currentUser).thenReturn(null);
+      when(() => mockRepo.signInWithEmail(any(), any()))
+          .thenAnswer((_) async => const Left(AuthFailure('Credenciales inválidas')));
 
-        final container = makeContainer(mockStorage);
+      await container.read(authNotifierProvider.future);
+      await container
+          .read(authNotifierProvider.notifier)
+          .signInWithEmail('test@test.com', 'wrong');
 
-        final token = await container.read(authProvider.future);
+      final state = container.read(authNotifierProvider);
+      expect(state, isA<AsyncError<User?>>());
+    });
 
-        expect(token, isNull);
-        verify(() => mockStorage.readToken()).called(1);
-      },
-    );
+    test('signUp on success updates state to User', () async {
+      final fakeUser = _createFakeUser();
+      when(() => mockRepo.currentUser).thenReturn(null);
+      when(
+        () => mockRepo.signUp(
+          email: any(named: 'email'),
+          password: any(named: 'password'),
+          name: any(named: 'name'),
+        ),
+      ).thenAnswer((_) async => Right(fakeUser));
 
-    // AUTH-001 sc2 — Logout clears token and state becomes null
-    test(
-      'AUTH-001 sc2: logout() deletes token and state becomes AsyncData(null)',
-      () async {
-        when(() => mockStorage.readToken())
-            .thenAnswer((_) async => 'existing-token');
-        when(() => mockStorage.deleteToken()).thenAnswer((_) async {});
+      await container.read(authNotifierProvider.future);
+      await container.read(authNotifierProvider.notifier).signUp(
+            email: 'new@test.com',
+            password: 'password123',
+            name: 'New User',
+          );
 
-        final container = makeContainer(mockStorage);
+      final state = container.read(authNotifierProvider);
+      expect(state.value, isNotNull);
+    });
 
-        // Wait for initial build to complete.
-        await container.read(authProvider.future);
+    test('signOut clears user state', () async {
+      final fakeUser = _createFakeUser();
+      when(() => mockRepo.currentUser).thenReturn(fakeUser);
+      when(() => mockRepo.signOut())
+          .thenAnswer((_) async => const Right(null));
 
-        // Perform logout.
-        await container.read(authProvider.notifier).logout();
+      await container.read(authNotifierProvider.future);
+      await container.read(authNotifierProvider.notifier).signOut();
 
-        final stateAfterLogout = container.read(authProvider);
-        expect(stateAfterLogout, equals(const AsyncData<String?>(null)));
-        verify(() => mockStorage.deleteToken()).called(1);
-      },
-    );
-
-    // AUTH-001 sc3 — Notifier starts in loading state during build()
-    test(
-      'AUTH-001 sc3: state is AsyncLoading before build() resolves',
-      () async {
-        // Use a Completer to control when readToken completes.
-        var readTokenCalled = false;
-
-        when(() => mockStorage.readToken()).thenAnswer((_) async {
-          readTokenCalled = true;
-          // Return after a brief delay to keep loading state observable.
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-          return 'delayed-token';
-        });
-
-        final container = makeContainer(mockStorage);
-
-        // Read the provider synchronously — should be loading initially.
-        final initialState = container.read(authProvider);
-        expect(initialState, isA<AsyncLoading<String?>>());
-
-        // Now await resolution.
-        final resolvedToken = await container.read(authProvider.future);
-        expect(resolvedToken, equals('delayed-token'));
-        expect(readTokenCalled, isTrue);
-      },
-    );
-
-    // login() — writes token and updates state
-    test(
-      'login() writes token to storage and updates state to AsyncData(token)',
-      () async {
-        when(() => mockStorage.readToken()).thenAnswer((_) async => null);
-        when(
-          () => mockStorage.writeToken(any()),
-        ).thenAnswer((_) async {});
-
-        final container = makeContainer(mockStorage);
-
-        // Wait for initial build.
-        await container.read(authProvider.future);
-
-        await container
-            .read(authProvider.notifier)
-            .login('new-jwt-token');
-
-        final stateAfterLogin = container.read(authProvider);
-        expect(
-          stateAfterLogin,
-          equals(const AsyncData<String?>('new-jwt-token')),
-        );
-        verify(() => mockStorage.writeToken('new-jwt-token')).called(1);
-      },
-    );
+      final state = container.read(authNotifierProvider);
+      expect(state.value, isNull);
+    });
   });
 }

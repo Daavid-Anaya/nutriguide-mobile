@@ -50,3 +50,6 @@ app.*.map.json
 
 # 
 .atl
+
+# Environment variables file
+.env

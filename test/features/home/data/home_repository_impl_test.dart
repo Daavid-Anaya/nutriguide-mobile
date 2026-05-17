@@ -11,15 +11,15 @@ import 'package:nutriguide_mobile/features/home/data/home_repository_impl.dart';
 import 'package:nutriguide_mobile/features/home/domain/meal.dart';
 import 'package:nutriguide_mobile/features/profile/domain/profile_repository.dart';
 import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
-import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_repository_impl.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
+import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_repository.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list.dart';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 class _MockShoppingListRepo extends Mock
-    implements ShoppingListRepositoryImpl {}
+    implements ShoppingListRepository {}
 
 class _MockBox extends Mock implements Box<dynamic> {}
 
