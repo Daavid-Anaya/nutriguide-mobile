@@ -1,6 +1,9 @@
+import 'dart:async' show unawaited;
+
 import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nutriguide_mobile/core/error/failure.dart';
 import 'package:nutriguide_mobile/features/scanner/data/open_food_facts_client.dart';
 import 'package:nutriguide_mobile/features/scanner/domain/product.dart';
@@ -10,17 +13,22 @@ import 'package:nutriguide_mobile/features/scanner/domain/scanner_repository.dar
 ///
 /// Data strategy: **Online primary + Hive cache on success** (AD-08).
 /// - [getProductByBarcode]: calls Open Food Facts API, caches result on success.
+///   When authenticated, a fire-and-forget upsert to Supabase is triggered (AD-53).
 /// - [getCachedProduct]: reads from Hive box without hitting the network.
 /// - [getAlternatives]: stub returning an empty list (AI scoring API not yet available).
 class ScannerRepositoryImpl implements ScannerRepository {
   const ScannerRepositoryImpl({
     required OpenFoodFactsClient client,
     required Box<dynamic> productsBox,
+    SupabaseClient? supabaseClient,
   })  : _client = client,
-        _productsBox = productsBox;
+        _productsBox = productsBox,
+        _supabaseClient = supabaseClient;
 
   final OpenFoodFactsClient _client;
   final Box<dynamic> _productsBox;
+  // nullable — backward compatible; null means no Supabase sync (AD-53)
+  final SupabaseClient? _supabaseClient;
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -35,9 +43,42 @@ class ScannerRepositoryImpl implements ScannerRepository {
       // Until then, this line causes compile errors — intentional TDD "red" state.
       final product = Product.fromJson(productMap);
       await _productsBox.put(barcode, productMap);
+      // AD-53: fire-and-forget upsert — does not affect scan result
+      unawaited(_upsertToSupabase(product, barcode));
       return Right(product);
     } on DioException catch (e) {
       return Left(_mapDioError(e));
+    }
+  }
+
+  /// Fire-and-forget upsert to Supabase [scanned_products] table.
+  ///
+  /// Skips silently when no client is provided, when unauthenticated, or
+  /// on any Supabase error (AD-53: write-only, non-blocking).
+  Future<void> _upsertToSupabase(Product product, String barcode) async {
+    final userId = _supabaseClient?.auth.currentUser?.id;
+    if (userId == null) return; // not authenticated or no client
+
+    try {
+      await _supabaseClient!.from('scanned_products').upsert({
+        'barcode': barcode,
+        'user_id': userId,
+        'name': product.name,
+        'brands': product.brands,
+        'image_url': product.imageUrl,
+        'nutriscore_grade': product.nutriscoreGrade,
+        'energy': product.nutriments?.energy,
+        'fat': product.nutriments?.fat,
+        'saturated_fat': product.nutriments?.saturatedFat,
+        'carbohydrates': product.nutriments?.carbohydrates,
+        'sugars': product.nutriments?.sugars,
+        'proteins': product.nutriments?.proteins,
+        'salt': product.nutriments?.salt,
+        'fiber': product.nutriments?.fiber,
+        'scanned_at': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {
+      // Fire-and-forget: swallow errors silently (AD-53)
     }
   }
 

@@ -1,22 +1,27 @@
-// Spec: SHOPPING-LIST-006 sc1–sc5
-// TDD: T-3.1 [RED] — Tests FAIL until shopping_list_notifier.dart is created (T-3.2).
-// Design: AD-21
+// Spec: SHOPPING-LIST-006 sc1–sc5 | SHOPPING-LIST-SYNC-002 S1, S5, S6
+// TDD: T-3.1 [RED→GREEN] | Phase 4 Realtime tests
+// Design: AD-21, AD-57
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:nutriguide_mobile/core/error/failure.dart';
+import 'package:nutriguide_mobile/core/supabase/supabase_providers.dart';
 import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_providers.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_repository.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list.dart';
 import 'package:nutriguide_mobile/features/shopping_list/presentation/providers/shopping_list_notifier.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../../helpers/mock_supabase.dart';
 
 // ---------------------------------------------------------------------------
 // Mock + Fake (required by mocktail for any() with custom types)
 // ---------------------------------------------------------------------------
 class MockShoppingListRepo extends Mock implements ShoppingListRepository {}
+class MockSupabaseClientForNotifier extends Mock implements SupabaseClient {}
+class MockGoTrueClientForNotifier extends Mock implements GoTrueClient {}
 
 /// Fake used to register a fallback value for [ShoppingList] with mocktail.
 /// Required whenever `any()` is used as an argument matcher for a parameter
@@ -53,20 +58,45 @@ ShoppingList _makeList({
     );
 
 // ---------------------------------------------------------------------------
-// Helper — ProviderContainer with mock repo injected
+// Helper — ProviderContainer with mock repo + unauthenticated Supabase injected
 // ---------------------------------------------------------------------------
+
+/// Default unauthenticated Supabase client for existing notifier tests.
+///
+/// The notifier's build() now reads supabaseClientProvider for Realtime.
+/// Existing tests don't test Realtime, so we provide a mock client where
+/// currentUser == null — no Realtime channel is opened (AD-57).
+SupabaseClient _makeUnauthenticatedClient() {
+  final client = MockSupabaseClientForNotifier();
+  final auth = MockGoTrueClientForNotifier();
+  when(() => client.auth).thenReturn(auth);
+  when(() => auth.currentUser).thenReturn(null);
+  return client;
+}
+
 ProviderContainer _makeContainer(MockShoppingListRepo mockRepo) {
   return ProviderContainer(
     overrides: [
       shoppingListRepositoryProvider.overrideWithValue(mockRepo),
+      supabaseClientProvider.overrideWithValue(_makeUnauthenticatedClient()),
     ],
   );
 }
 
 void main() {
-  // Register fallback value for ShoppingList so mocktail any() works with it.
+  // Register fallback values for all custom types used with any() matcher.
   setUpAll(() {
     registerFallbackValue(_FakeShoppingList());
+    // Needed for Realtime subscription stubs (Phase 4)
+    registerFallbackValue(PostgresChangeEvent.all);
+    // Register fallback for the postgres change callback
+    void fakePgCallback(PostgresChangePayload _) {}
+    registerFallbackValue(fakePgCallback);
+    // Register fallback for the subscribe callback
+    void fakeSubscribeCallback(RealtimeSubscribeStatus _, Object? __) {}
+    registerFallbackValue(fakeSubscribeCallback);
+    // Register fallback for RealtimeChannel (used with any() in removeChannel stub)
+    registerFallbackValue(FakeRealtimeChannel());
   });
 
   // ---------------------------------------------------------------------------
@@ -379,6 +409,133 @@ void main() {
       final itemIds = data.list.items.map((i) => i.id).toList();
       // B(unchecked) should come before A(checked) after sorting
       expect(itemIds, equals(['B', 'A']));
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ShoppingListNotifier — Realtime subscription (Phase 4)
+  // Spec: SHOPPING-LIST-SYNC-002 S1, S5, S6
+  // Design: AD-57 — Realtime in Notifier (not repo), lifecycle via ref.onDispose
+  // ─────────────────────────────────────────────────────────────────────────
+  group('ShoppingListNotifier — Realtime subscription', () {
+    // Helper: create a container with BOTH shoppingListRepositoryProvider
+    // and supabaseClientProvider overridden (needed for Realtime wiring).
+    ProviderContainer _makeContainerWithRealtime(
+      MockShoppingListRepo mockRepo,
+      SupabaseClient mockClient,
+    ) {
+      return ProviderContainer(
+        overrides: [
+          shoppingListRepositoryProvider.overrideWithValue(mockRepo),
+          supabaseClientProvider.overrideWithValue(mockClient),
+        ],
+      );
+    }
+
+    test('4.1 — authenticated build: subscribes to shopping_items channel', () async {
+      // Setup
+      final mockRepo = MockShoppingListRepo();
+      final mockClient = MockSupabaseClientForNotifier();
+      final mockAuth = MockGoTrueClientForNotifier();
+      final mockChannel = MockRealtimeChannel();
+      final fakeUser = createFakeUser();
+
+      // Repo mock
+      when(() => mockRepo.getOrCreateDefaultList())
+          .thenAnswer((_) async => Right(_makeList()));
+
+      // Auth mock — user is authenticated
+      when(() => mockClient.auth).thenReturn(mockAuth);
+      when(() => mockAuth.currentUser).thenReturn(fakeUser);
+
+      // Channel mock — stub the full channel chain
+      when(() => mockClient.channel(any())).thenReturn(mockChannel);
+      when(
+        () => mockChannel.onPostgresChanges(
+          event: any(named: 'event'),
+          schema: any(named: 'schema'),
+          table: any(named: 'table'),
+          callback: any(named: 'callback'),
+        ),
+      ).thenReturn(mockChannel);
+      when(() => mockChannel.subscribe(any())).thenReturn(mockChannel);
+      // Also stub removeChannel — called when addTearDown disposes the container
+      when(() => mockClient.removeChannel(any()))
+          .thenAnswer((_) async => 'ok');
+
+      final container = _makeContainerWithRealtime(mockRepo, mockClient);
+      addTearDown(container.dispose);
+
+      // Build notifier
+      await container.read(shoppingListNotifierProvider.future);
+
+      // Verify channel was opened for the authenticated user (AD-57, S1)
+      verify(() => mockClient.channel(any())).called(1);
+      verify(() => mockChannel.subscribe(any())).called(1);
+    });
+
+    test('4.2 — unauthenticated build: NO channel opened', () async {
+      // Setup
+      final mockRepo = MockShoppingListRepo();
+      final mockClient = MockSupabaseClientForNotifier();
+      final mockAuth = MockGoTrueClientForNotifier();
+
+      // Repo mock
+      when(() => mockRepo.getOrCreateDefaultList())
+          .thenAnswer((_) async => Right(_makeList()));
+
+      // Auth mock — user is NOT authenticated (AD-56, S6)
+      when(() => mockClient.auth).thenReturn(mockAuth);
+      when(() => mockAuth.currentUser).thenReturn(null);
+
+      final container = _makeContainerWithRealtime(mockRepo, mockClient);
+      addTearDown(container.dispose);
+
+      // Build notifier
+      await container.read(shoppingListNotifierProvider.future);
+
+      // Verify NO channel was opened
+      verifyNever(() => mockClient.channel(any()));
+    });
+
+    test('4.3 — disposal: removeChannel called when container disposed', () async {
+      final mockRepo = MockShoppingListRepo();
+      final mockClient = MockSupabaseClientForNotifier();
+      final mockAuth = MockGoTrueClientForNotifier();
+      final mockChannel = MockRealtimeChannel();
+      final fakeUser = createFakeUser();
+
+      when(() => mockRepo.getOrCreateDefaultList())
+          .thenAnswer((_) async => Right(_makeList()));
+
+      when(() => mockClient.auth).thenReturn(mockAuth);
+      when(() => mockAuth.currentUser).thenReturn(fakeUser);
+
+      when(() => mockClient.channel(any())).thenReturn(mockChannel);
+      when(
+        () => mockChannel.onPostgresChanges(
+          event: any(named: 'event'),
+          schema: any(named: 'schema'),
+          table: any(named: 'table'),
+          callback: any(named: 'callback'),
+        ),
+      ).thenReturn(mockChannel);
+      when(() => mockChannel.subscribe(any())).thenReturn(mockChannel);
+      when(() => mockClient.removeChannel(any()))
+          .thenAnswer((_) async => 'ok');
+
+      final container = _makeContainerWithRealtime(mockRepo, mockClient);
+
+      // Build notifier
+      await container.read(shoppingListNotifierProvider.future);
+
+      // Dispose — should trigger ref.onDispose → removeChannel (AD-57, S5)
+      container.dispose();
+
+      // Give the async dispose a microtask to run
+      await Future<void>.microtask(() {});
+
+      verify(() => mockClient.removeChannel(mockChannel)).called(1);
     });
   });
 }

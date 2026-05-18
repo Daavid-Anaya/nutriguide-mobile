@@ -1,11 +1,14 @@
-// Spec: SHOPPING-LIST-006 | Design: AD-21
-// TDD: T-3.2 [GREEN] — Implements ShoppingListNotifier to pass notifier tests.
+// Spec: SHOPPING-LIST-006 | SHOPPING-LIST-SYNC-002
+// Design: AD-21, AD-57 — Realtime in Notifier (not repo), lifecycle via ref.onDispose
+// TDD: Phase 4 [GREEN] — Adds Realtime subscription in build()
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nutriguide_mobile/core/supabase/supabase_providers.dart';
 import 'package:nutriguide_mobile/features/shopping_list/data/shopping_list_providers.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_repository.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -51,13 +54,16 @@ final shoppingListNotifierProvider =
 /// guaranteeing the state always resolves to [ShoppingListData] (the
 /// auto-create ensures [ShoppingListEmpty] is only returned on repo failure).
 ///
+/// Also opens a Realtime subscription to `shopping_items` changes when the
+/// user is authenticated (AD-57). The channel is closed via [ref.onDispose].
+///
 /// Every mutation (add, remove, toggle, clear) follows the pattern:
 ///   1. Get current list via [_currentList].
 ///   2. Modify items immutably via `copyWith`.
 ///   3. Sort via [_sortedList] (unchecked first, checked last).
 ///   4. Persist via [_saveAndUpdate].
 ///
-/// Spec: SHOPPING-LIST-006 | Design: AD-21.
+/// Spec: SHOPPING-LIST-006 | SHOPPING-LIST-SYNC-002 | Design: AD-21, AD-57.
 class ShoppingListNotifier extends AsyncNotifier<ShoppingListState> {
   ShoppingListRepository get _repo =>
       ref.read(shoppingListRepositoryProvider);
@@ -65,6 +71,27 @@ class ShoppingListNotifier extends AsyncNotifier<ShoppingListState> {
   @override
   Future<ShoppingListState> build() async {
     final result = await _repo.getOrCreateDefaultList();
+
+    // AD-57: Open Realtime subscription when authenticated.
+    // The repo stays stateless — the notifier owns the channel lifecycle.
+    final supabaseClient = ref.read(supabaseClientProvider);
+    final currentUser = supabaseClient.auth.currentUser;
+
+    if (currentUser != null) {
+      final channel = supabaseClient
+          .channel('shopping_items_changes_${currentUser.id}')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'shopping_items',
+            callback: (payload) => _onRealtimeChange(payload),
+          )
+          .subscribe();
+
+      // Cleanup when notifier is disposed (screen change, logout) — AD-57, S5
+      ref.onDispose(() => supabaseClient.removeChannel(channel));
+    }
+
     return result.fold(
       (_) => const ShoppingListEmpty(),
       (list) => ShoppingListData(_sortedList(list)),
@@ -125,6 +152,23 @@ class ShoppingListNotifier extends AsyncNotifier<ShoppingListState> {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
+
+  /// Called when a Realtime postgres change arrives (AD-57).
+  ///
+  /// Re-fetches all lists from Supabase to get consistent state.
+  /// Idempotent — at most one extra fetch per change.
+  void _onRealtimeChange(PostgresChangePayload payload) {
+    _refreshLists();
+  }
+
+  /// Re-fetches the active list from the repository and updates state.
+  Future<void> _refreshLists() async {
+    final result = await _repo.getOrCreateDefaultList();
+    state = AsyncData(result.fold(
+      (_) => const ShoppingListEmpty(),
+      (list) => ShoppingListData(_sortedList(list)),
+    ));
+  }
 
   /// Returns the [ShoppingList] from the current [AsyncData] state, or null.
   ///

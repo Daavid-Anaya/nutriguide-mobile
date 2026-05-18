@@ -1,4 +1,5 @@
 // Spec: HTTP-CLIENT-001 sc3, sc4 | OFFLINE-STORAGE-001 sc2 | CORE-MODELS-001 sc4
+//       SCANNER-SYNC-001 S1, S2, S4
 // TDD note: tests that use Product.fromJson WON'T compile until build_runner runs (T-16).
 // Tests for OpenFoodFactsClient and error mapping CAN run now (no Freezed dependency).
 
@@ -6,9 +7,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nutriguide_mobile/core/error/failure.dart';
 import 'package:nutriguide_mobile/features/scanner/data/open_food_facts_client.dart';
 import 'package:nutriguide_mobile/features/scanner/data/scanner_repository_impl.dart';
+import '../../../helpers/mock_supabase.dart';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -342,6 +345,138 @@ void main() {
           (alternatives) => expect(alternatives, isEmpty),
         );
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // SCANNER-SYNC-001 — Supabase upsert (fire-and-forget)
+  // -------------------------------------------------------------------------
+  group('ScannerRepositoryImpl — Supabase upsert (SCANNER-SYNC-001)', () {
+    late _MockOpenFoodFactsClient mockClientSync;
+    late _MockBox mockBoxSync;
+    late MockSupabaseClient mockSupabaseClient;
+    late MockGoTrueClient mockGoTrue;
+    late MockSupabaseQueryBuilder mockQueryBuilder;
+    late MockPostgrestFilterBuilder<void> mockUpsertBuilder;
+
+    setUp(() {
+      mockClientSync = _MockOpenFoodFactsClient();
+      mockBoxSync = _MockBox();
+      mockSupabaseClient = MockSupabaseClient();
+      mockGoTrue = MockGoTrueClient();
+      mockQueryBuilder = MockSupabaseQueryBuilder();
+      mockUpsertBuilder = MockPostgrestFilterBuilder<void>();
+
+      // Stub Hive write so it doesn't fail
+      when(() => mockBoxSync.put(any(), any())).thenAnswer((_) async {});
+
+      // Stub auth
+      when(() => mockSupabaseClient.auth).thenReturn(mockGoTrue);
+
+      // Register fallback for RequestOptions
+      registerFallbackValue(RequestOptions(path: ''));
+    });
+
+    // SCANNER-SYNC-001 S1 — authenticated: upsert called after successful scan
+    test('S1 — authenticated: upsert called after successful scan', () async {
+      // Arrange: mock OFF returns valid product
+      when(() => mockClientSync.getProductByBarcode(any()))
+          .thenAnswer((_) async => kOFFApiResponse);
+
+      // Arrange: authenticated user
+      final fakeUser = createFakeUser();
+      when(() => mockGoTrue.currentUser).thenReturn(fakeUser);
+
+      // Arrange: mock Supabase upsert chain
+      // NOTE: SupabaseQueryBuilder implements Future<PostgrestList> — MUST use thenAnswer
+      when(() => mockSupabaseClient.from('scanned_products'))
+          .thenAnswer((_) => mockQueryBuilder);
+      when(() => mockQueryBuilder.upsert(any()))
+          .thenAnswer((_) => FakePostgrestFilterBuilder<void>(Future.value()));
+
+      final repo = ScannerRepositoryImpl(
+        client: mockClientSync,
+        productsBox: mockBoxSync,
+        supabaseClient: mockSupabaseClient,
+      );
+
+      // Act
+      final result = await repo.getProductByBarcode(kNutellaBarcode);
+
+      // Assert: scan succeeds
+      expect(result.isRight(), isTrue);
+
+      // Allow fire-and-forget to complete
+      await Future<void>.delayed(Duration.zero);
+
+      // Assert: Supabase upsert was called
+      verify(() => mockSupabaseClient.from('scanned_products')).called(1);
+      verify(() => mockQueryBuilder.upsert(any())).called(1);
+    });
+
+    // SCANNER-SYNC-001 S4 — unauthenticated: scan succeeds, NO Supabase call
+    test('S4 — unauthenticated: scan succeeds, NO Supabase call', () async {
+      // Arrange: mock OFF returns valid product
+      when(() => mockClientSync.getProductByBarcode(any()))
+          .thenAnswer((_) async => kOFFApiResponse);
+
+      // Arrange: no authenticated user
+      when(() => mockGoTrue.currentUser).thenReturn(null);
+
+      final repo = ScannerRepositoryImpl(
+        client: mockClientSync,
+        productsBox: mockBoxSync,
+        supabaseClient: mockSupabaseClient,
+      );
+
+      // Act
+      final result = await repo.getProductByBarcode(kNutellaBarcode);
+
+      // Allow fire-and-forget to complete
+      await Future<void>.delayed(Duration.zero);
+
+      // Assert: scan succeeds
+      expect(result.isRight(), isTrue);
+
+      // Assert: NO Supabase call
+      verifyNever(() => mockSupabaseClient.from('scanned_products'));
+    });
+
+    // SCANNER-SYNC-001 S2 — upsert failure does NOT fail scan result
+    test('S2 — upsert failure does NOT fail scan result, Hive still written', () async {
+      // Arrange: mock OFF returns valid product
+      when(() => mockClientSync.getProductByBarcode(any()))
+          .thenAnswer((_) async => kOFFApiResponse);
+
+      // Arrange: authenticated user
+      final fakeUser = createFakeUser();
+      when(() => mockGoTrue.currentUser).thenReturn(fakeUser);
+
+      // Arrange: Supabase upsert throws
+      // NOTE: SupabaseQueryBuilder implements Future<PostgrestList> — MUST use thenAnswer
+      when(() => mockSupabaseClient.from('scanned_products'))
+          .thenAnswer((_) => mockQueryBuilder);
+      when(() => mockQueryBuilder.upsert(any()))
+          .thenAnswer((_) => FakePostgrestFilterBuilder<void>(
+              Future.error(Exception('Supabase error'))));
+
+      final repo = ScannerRepositoryImpl(
+        client: mockClientSync,
+        productsBox: mockBoxSync,
+        supabaseClient: mockSupabaseClient,
+      );
+
+      // Act
+      final result = await repo.getProductByBarcode(kNutellaBarcode);
+
+      // Allow fire-and-forget to settle
+      await Future<void>.delayed(Duration.zero);
+
+      // Assert: scan still returns Right(product)
+      expect(result.isRight(), isTrue);
+
+      // Assert: Hive still written
+      verify(() => mockBoxSync.put(kNutellaBarcode, any())).called(1);
     });
   });
 }

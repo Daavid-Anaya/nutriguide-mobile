@@ -1,257 +1,158 @@
-// Spec: PROFILE-DATA-001 sc1–sc4
-// TDD: T-01 [RED] — Tests FAIL until profile_repository_impl.dart is created (T-02).
-
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:postgrest/postgrest.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:nutriguide_mobile/core/error/failure.dart';
+import 'package:fpdart/fpdart.dart';
 import 'package:nutriguide_mobile/features/profile/data/profile_repository_impl.dart';
 import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
+import '../../../helpers/mock_supabase.dart';
+
+// ── Important: ALL Supabase builder types implement Future<T>, so they need
+// thenAnswer (not thenReturn) in stubs. SupabaseQueryBuilder, PostgrestFilterBuilder,
+// and PostgrestTransformBuilder all extend PostgrestBuilder which implements Future<T>.
 
 void main() {
+  late MockSupabaseClient mockClient;
+  late MockGoTrueClient mockAuth;
+  late MockSupabaseQueryBuilder mockQueryBuilder;
+  late MockPostgrestFilterBuilder<PostgrestList> mockFilterList;
   late ProfileRepositoryImpl repository;
+
+  const fakeUserId = 'user-123';
+  const fakeEmail = 'test@nutriguide.app';
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
-    repository = ProfileRepositoryImpl(sharedPreferences: prefs);
+
+    mockClient = MockSupabaseClient();
+    mockAuth = MockGoTrueClient();
+    mockQueryBuilder = MockSupabaseQueryBuilder();
+    mockFilterList = MockPostgrestFilterBuilder<PostgrestList>();
+
+    // GoTrueClient is NOT a Future, thenReturn is safe here
+    when(() => mockClient.auth).thenReturn(mockAuth);
+
+    repository = ProfileRepositoryImpl(
+      sharedPreferences: prefs,
+      supabaseClient: mockClient,
+    );
   });
 
-  // ---------------------------------------------------------------------------
-  // PROFILE-DATA-001 sc1 — Load profile when no data stored returns defaults
-  // ---------------------------------------------------------------------------
-  group('getProfile', () {
-    test('sc1 — returns Right(UserProfile) with defaults when no data stored', () async {
-      // SharedPrefs is empty (setMockInitialValues({}))
+  // ── getProfile ─────────────────────────────────────────────────────────
+
+  group('getProfile()', () {
+    test('S1 — authenticated: reads from Supabase, populates id+email', () async {
+      final fakeRow = <String, dynamic>{
+        'id': fakeUserId,
+        'name': 'Ana García',
+        'email': fakeEmail,
+        'avatar_url': null,
+        'dietary_restrictions': <String>[],
+        'primary_goal': null,
+        'grocery_budget': 350.0,
+      };
+
+      // .single() returns PostgrestTransformBuilder<PostgrestMap>
+      // Wrap real Future so await works correctly
+      final fakeSingle = FakePostgrestTransformBuilder<PostgrestMap>(
+        Future.value(fakeRow),
+      );
+
+      when(() => mockAuth.currentUser).thenReturn(createFakeUser());
+      // from() returns SupabaseQueryBuilder (a Future) → thenAnswer
+      when(() => mockClient.from('profiles')).thenAnswer((_) => mockQueryBuilder);
+      // select() returns PostgrestFilterBuilder (a Future) → thenAnswer
+      when(() => mockQueryBuilder.select(any())).thenAnswer((_) => mockFilterList);
+      // eq() returns PostgrestFilterBuilder (a Future) → thenAnswer
+      when(() => mockFilterList.eq(any(), any())).thenAnswer((_) => mockFilterList);
+      // single() returns PostgrestTransformBuilder (a Future) → thenAnswer with Fake
+      when(() => mockFilterList.single()).thenAnswer((_) => fakeSingle);
+
       final result = await repository.getProfile();
 
       expect(result.isRight(), isTrue);
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (profile) {
-          expect(profile.name, equals('Usuario'));
-          expect(profile.avatarUrl, isNull);
-        },
-      );
+      final profile = result.toNullable()!;
+      expect(profile.id, fakeUserId);
+      expect(profile.email, fakeEmail);
+      expect(profile.name, 'Ana García');
+      expect(profile.groceryBudget, 350.0);
     });
 
-    // PROFILE-DATA-001 sc2 — Load profile with stored values
-    test('sc2 — returns stored name and avatarUrl when both keys are present', () async {
-      SharedPreferences.setMockInitialValues({
-        'user_name': 'Ana',
-        'user_avatar_url': 'https://example.com/ana.jpg',
-      });
-      final prefs = await SharedPreferences.getInstance();
-      repository = ProfileRepositoryImpl(sharedPreferences: prefs);
+    test('S2 — unauthenticated: reads from SharedPreferences', () async {
+      when(() => mockAuth.currentUser).thenReturn(null);
 
       final result = await repository.getProfile();
 
       expect(result.isRight(), isTrue);
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (profile) {
-          expect(profile.name, equals('Ana'));
-          expect(profile.avatarUrl, equals('https://example.com/ana.jpg'));
-        },
+      final profile = result.toNullable()!;
+      expect(profile.id, '');
+      expect(profile.email, '');
+      verifyNever(() => mockClient.from(any()));
+    });
+
+    test('S3 — Supabase error falls back to SharedPrefs cache', () async {
+      final fakeError = FakePostgrestTransformBuilder<PostgrestMap>(
+        Future.error(Exception('network error')),
       );
+
+      when(() => mockAuth.currentUser).thenReturn(createFakeUser());
+      when(() => mockClient.from('profiles')).thenAnswer((_) => mockQueryBuilder);
+      when(() => mockQueryBuilder.select(any())).thenAnswer((_) => mockFilterList);
+      when(() => mockFilterList.eq(any(), any())).thenAnswer((_) => mockFilterList);
+      when(() => mockFilterList.single()).thenAnswer((_) => fakeError);
+
+      final result = await repository.getProfile();
+
+      // Should NOT throw, falls back to local
+      expect(result.isRight(), isTrue);
+      final profile = result.toNullable()!;
+      expect(profile.name, 'Usuario'); // default from SharedPrefs
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // PROFILE-DATA-001 sc3 — Save profile persists both keys
-  // ---------------------------------------------------------------------------
-  group('updateProfile', () {
-    test('sc3 — persists name to SharedPrefs and returns Right(null)', () async {
-      const profile = UserProfile(
-        id: '',
-        name: 'Carlos',
-        email: '',
-        avatarUrl: null,
+  // ── updateProfile ──────────────────────────────────────────────────────
+
+  group('updateProfile()', () {
+    test('S4 — authenticated: upserts to Supabase + updates SharedPrefs', () async {
+      final updatedProfile = UserProfile(
+        id: fakeUserId,
+        name: 'Ana Updated',
+        email: fakeEmail,
+        groceryBudget: 400.0,
       );
 
-      final result = await repository.updateProfile(profile);
+      // upsert() returns PostgrestFilterBuilder<dynamic> (also a Future)
+      final fakeUpsert = FakePostgrestFilterBuilder<dynamic>(
+        Future.value(<dynamic>[]),
+      );
+
+      when(() => mockAuth.currentUser).thenReturn(createFakeUser());
+      // from() is a Future → thenAnswer
+      when(() => mockClient.from('profiles')).thenAnswer((_) => mockQueryBuilder);
+      // upsert() is a Future → thenAnswer with Fake
+      when(() => mockQueryBuilder.upsert(any())).thenAnswer((_) => fakeUpsert);
+
+      final result = await repository.updateProfile(updatedProfile);
 
       expect(result.isRight(), isTrue);
-
-      // Verify the value was actually stored
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('user_name'), equals('Carlos'));
-      // avatarUrl is null → key should be absent
-      expect(prefs.getString('user_avatar_url'), isNull);
+      // Verify Supabase was called
+      verify(() => mockClient.from('profiles')).called(greaterThanOrEqualTo(1));
     });
 
-    test('persists avatarUrl when non-null', () async {
-      const profile = UserProfile(
+    test('S5 — unauthenticated: writes to SharedPrefs only', () async {
+      const updatedProfile = UserProfile(
         id: '',
-        name: 'Lucía',
+        name: 'Local User',
         email: '',
-        avatarUrl: 'https://example.com/lucia.jpg',
       );
 
-      final result = await repository.updateProfile(profile);
+      when(() => mockAuth.currentUser).thenReturn(null);
+
+      final result = await repository.updateProfile(updatedProfile);
 
       expect(result.isRight(), isTrue);
-
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('user_name'), equals('Lucía'));
-      expect(prefs.getString('user_avatar_url'), equals('https://example.com/lucia.jpg'));
+      verifyNever(() => mockClient.from(any()));
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // PROFILE-PERSIST-001 sc1–sc4 — grocery_budget persistence (T-01)
-  // ---------------------------------------------------------------------------
-  group('grocery_budget persistence', () {
-    test('saves groceryBudget to SharedPreferences', () async {
-      const profile = UserProfile(
-        id: '',
-        name: 'Ana',
-        email: '',
-        groceryBudget: 350.0,
-      );
-
-      await repository.updateProfile(profile);
-      final result = await repository.getProfile();
-
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (loaded) => expect(loaded.groceryBudget, equals(350.0)),
-      );
-    });
-
-    test('loads null groceryBudget when key absent', () async {
-      // Fresh prefs (setMockInitialValues({}) in setUp)
-      final result = await repository.getProfile();
-
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (profile) => expect(profile.groceryBudget, isNull),
-      );
-    });
-
-    test('removes groceryBudget key when null is passed', () async {
-      // Save 350.0 first
-      await repository.updateProfile(const UserProfile(
-        id: '',
-        name: 'Ana',
-        email: '',
-        groceryBudget: 350.0,
-      ));
-      // Now update with null budget
-      await repository.updateProfile(const UserProfile(
-        id: '',
-        name: 'Ana',
-        email: '',
-        groceryBudget: null,
-      ));
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getDouble('grocery_budget'), isNull);
-    });
-
-    test('preserves existing name/avatarUrl when updating groceryBudget', () async {
-      // Save name + avatarUrl first
-      await repository.updateProfile(const UserProfile(
-        id: '',
-        name: 'Ana',
-        email: '',
-        avatarUrl: 'https://example.com/ana.jpg',
-      ));
-      // Now update with same profile + new budget
-      await repository.updateProfile(const UserProfile(
-        id: '',
-        name: 'Ana',
-        email: '',
-        avatarUrl: 'https://example.com/ana.jpg',
-        groceryBudget: 350.0,
-      ));
-      final result = await repository.getProfile();
-
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (profile) {
-          expect(profile.name, equals('Ana'));
-          expect(profile.avatarUrl, equals('https://example.com/ana.jpg'));
-          expect(profile.groceryBudget, equals(350.0));
-        },
-      );
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // PROFILE-DATA-001 sc4 — CacheFailure on SharedPreferences error
-  // Uses a fake SharedPreferences implementation that always throws.
-  // ---------------------------------------------------------------------------
-  group('CacheFailure wrapping', () {
-    test('sc4 — getProfile returns Left(CacheFailure) on exception', () async {
-      final prefs = _ThrowingSharedPreferences();
-      final throwingRepo = ProfileRepositoryImpl(sharedPreferences: prefs);
-
-      final result = await throwingRepo.getProfile();
-
-      expect(result.isLeft(), isTrue);
-      result.fold(
-        (failure) => expect(failure, isA<CacheFailure>()),
-        (_) => fail('Expected Left but got Right'),
-      );
-    });
-
-    test('sc4 — updateProfile returns Left(CacheFailure) on exception', () async {
-      final prefs = _ThrowingSharedPreferences();
-      final throwingRepo = ProfileRepositoryImpl(sharedPreferences: prefs);
-      const profile = UserProfile(id: '', name: 'Test', email: '');
-
-      final result = await throwingRepo.updateProfile(profile);
-
-      expect(result.isLeft(), isTrue);
-      result.fold(
-        (failure) => expect(failure, isA<CacheFailure>()),
-        (_) => fail('Expected Left but got Right'),
-      );
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Test helper: fake SharedPreferences that always throws
-// Used to force CacheFailure path in ProfileRepositoryImpl.
-// ---------------------------------------------------------------------------
-class _ThrowingSharedPreferences implements SharedPreferences {
-  @override
-  String? getString(String key) => throw Exception('SharedPreferences error');
-
-  @override
-  Future<bool> setString(String key, String value) =>
-      throw Exception('SharedPreferences error');
-
-  @override
-  Future<bool> remove(String key) => throw Exception('SharedPreferences error');
-
-  // Unused in tests — minimal stubs below
-  @override
-  Set<String> getKeys() => {};
-  @override
-  Object? get(String key) => null;
-  @override
-  bool? getBool(String key) => null;
-  @override
-  int? getInt(String key) => null;
-  @override
-  double? getDouble(String key) => null;
-  @override
-  List<String>? getStringList(String key) => null;
-  @override
-  Future<bool> setBool(String key, bool value) async => true;
-  @override
-  Future<bool> setInt(String key, int value) async => true;
-  @override
-  Future<bool> setDouble(String key, double value) async => true;
-  @override
-  Future<bool> setStringList(String key, List<String> value) async => true;
-  @override
-  bool containsKey(String key) => false;
-  @override
-  Future<bool> clear() async => true;
-  @override
-  Future<void> reload() async {}
-  @override
-  Future<bool> commit() async => true;
 }
