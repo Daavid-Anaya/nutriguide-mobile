@@ -1,13 +1,17 @@
-// Spec: PROFILE-STATE-001
-// Design: AD-38 (5 sealed variants), AD-39 (AsyncNotifier pattern)
+// Spec: PROFILE-STATE-001, AVATAR-NOTIFIER-001
+// Design: AD-38 (6 sealed variants), AD-39 (AsyncNotifier pattern), AD-61
+// TDD: T-08 [GREEN] — Added ProfileUploading + updateAvatar()
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nutriguide_mobile/core/supabase/supabase_providers.dart';
+import 'package:nutriguide_mobile/features/profile/data/avatar_upload_providers.dart';
+import 'package:nutriguide_mobile/features/profile/data/avatar_upload_service.dart';
 import 'package:nutriguide_mobile/features/profile/data/profile_providers.dart';
 import 'package:nutriguide_mobile/features/profile/domain/profile_repository.dart';
 import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
 
 // ---------------------------------------------------------------------------
-// Sealed State — 5 variants (AD-38)
+// Sealed State — 6 variants (AD-38 + ProfileUploading for AVATAR-NOTIFIER-001)
 // ---------------------------------------------------------------------------
 sealed class ProfileState {
   const ProfileState();
@@ -29,6 +33,11 @@ class ProfileEditing extends ProfileState {
 
 class ProfileSaving extends ProfileState {
   const ProfileSaving({required this.profile});
+  final UserProfile profile;
+}
+
+class ProfileUploading extends ProfileState {
+  const ProfileUploading({required this.profile});
   final UserProfile profile;
 }
 
@@ -85,6 +94,42 @@ class ProfileNotifier extends AsyncNotifier<ProfileState> {
         (failure) => AsyncData(ProfileError(failure.message)),
         (_) => AsyncData(ProfileData(profile: updated)),
       );
+    }
+  }
+
+  /// Orchestrates avatar pick → upload → save flow (AVATAR-NOTIFIER-001).
+  ///
+  /// Guard: only executes from [ProfileData] state (AD-61).
+  /// On success: calls [saveProfile] with new avatarUrl.
+  /// On [AvatarUploadCancelled]: silently returns to [ProfileData].
+  /// On [AvatarUploadFailed]: transitions to [ProfileError].
+  Future<void> updateAvatar() async {
+    // Guard: only from ProfileData (AVATAR-NOTIFIER-001-S4)
+    final currentState = state.value;
+    if (currentState is! ProfileData) return;
+
+    final profile = currentState.profile;
+    state = AsyncData(ProfileUploading(profile: profile));
+
+    final userId = ref.read(supabaseClientProvider).auth.currentUser!.id;
+    final uploadService = ref.read(avatarUploadServiceProvider);
+
+    try {
+      final newUrl = await uploadService.pickAndUpload(userId);
+
+      // Transition to Editing to reuse the existing saveProfile flow
+      state = AsyncData(ProfileEditing(profile: profile));
+      await saveProfile(
+        profile.name,
+        newUrl,
+        profile.groceryBudget,
+      );
+    } on AvatarUploadCancelled {
+      // User cancelled — return to data view silently (AVATAR-NOTIFIER-001-S2)
+      state = AsyncData(ProfileData(profile: profile));
+    } on AvatarUploadFailed {
+      // Upload failed — show user-friendly error (AVATAR-NOTIFIER-001-S3)
+      state = AsyncData(const ProfileError('No se pudo subir la imagen'));
     }
   }
 

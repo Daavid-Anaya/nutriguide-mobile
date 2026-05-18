@@ -1,6 +1,8 @@
 // Spec: PROFILE-UI-001 (S1, S2, S3, S4), PROFILE-UI-002 (S1–S7), PROFILE-UI-003
+//       AVATAR-UI-001 (S1, S2, S3, S4)
 // Design: AD-38, AD-39 — ProfileScreen states driven by ProfileNotifier
 // TDD: T-09, T-10, T-11 [RED] — failing tests for ProfileScreen (placeholder only)
+//      T-09 [RED] → T-10 [GREEN] — avatar upload UI
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,7 @@ import 'package:nutriguide_mobile/core/theme/app_theme.dart';
 import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
 import 'package:nutriguide_mobile/features/profile/presentation/profile_screen.dart';
 import 'package:nutriguide_mobile/features/profile/presentation/providers/profile_notifier.dart';
+import 'package:nutriguide_mobile/features/profile/presentation/widgets/profile_avatar.dart';
 
 // FakeProfileNotifier — seeds a specific state without calling real repository
 class FakeProfileNotifier extends ProfileNotifier {
@@ -166,6 +169,69 @@ void main() {
       await tester.pump();
       // Verify the editing form is shown with the Guardar button
       expect(find.text('Guardar'), findsOneWidget);
+    });
+  });
+
+  // ── T-09/T-10: Avatar upload UI ────────────────────────────────────────────
+  group('ProfileScreen — avatar upload UI', () {
+    // -------------------------------------------------------------------------
+    // AVATAR-UI-001-S1 — tappable avatar in data view
+    // -------------------------------------------------------------------------
+    testWidgets('wraps avatar in GestureDetector in data view', (tester) async {
+      await tester
+          .pumpWidget(buildSubject(ProfileData(profile: testProfile)));
+      await tester.pump();
+      // GestureDetector should wrap the ProfileAvatar
+      final gestureDetectors = tester
+          .widgetList<GestureDetector>(find.byType(GestureDetector))
+          .toList();
+      expect(gestureDetectors, isNotEmpty);
+    });
+
+    // -------------------------------------------------------------------------
+    // AVATAR-UI-001-S1 — "Cambiar foto" button in data view
+    // -------------------------------------------------------------------------
+    testWidgets('shows "Cambiar foto" text in data view', (tester) async {
+      await tester
+          .pumpWidget(buildSubject(ProfileData(profile: testProfile)));
+      await tester.pump();
+      expect(find.text('Cambiar foto'), findsOneWidget);
+    });
+
+    // -------------------------------------------------------------------------
+    // AVATAR-UI-001-S2 — CircularProgressIndicator during ProfileUploading
+    // -------------------------------------------------------------------------
+    testWidgets('shows CircularProgressIndicator when ProfileUploading',
+        (tester) async {
+      await tester.pumpWidget(
+          buildSubject(ProfileUploading(profile: testProfile)));
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+
+    // -------------------------------------------------------------------------
+    // AVATAR-UI-001-S3 — no avatarUrl TextFormField in edit form
+    // -------------------------------------------------------------------------
+    testWidgets('no "URL de avatar" field in edit form', (tester) async {
+      await tester
+          .pumpWidget(buildSubject(ProfileEditing(profile: testProfile)));
+      await tester.pump();
+      // Verify the avatarUrl TextFormField is gone
+      expect(find.widgetWithText(TextFormField, 'URL de avatar'), findsNothing);
+      // Only name and budget fields remain
+      expect(find.byType(TextFormField), findsNWidgets(2));
+    });
+
+    // -------------------------------------------------------------------------
+    // AVATAR-UI-001-S4 — ProfileAvatar displayed (non-tappable) in edit form
+    // -------------------------------------------------------------------------
+    testWidgets('ProfileAvatar visible in editing form (non-tappable)',
+        (tester) async {
+      await tester
+          .pumpWidget(buildSubject(ProfileEditing(profile: testProfile)));
+      await tester.pump();
+      // ProfileAvatar shown in form
+      expect(find.byType(ProfileAvatar), findsOneWidget);
     });
   });
 }

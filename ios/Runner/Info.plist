@@ -49,6 +49,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>NutriGuide needs camera access to scan product barcodes for nutritional information.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NutriGuide necesita acceso a tus fotos para cambiar tu avatar</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

@@ -31,6 +31,9 @@ dependencies:
   # Camera / Scanner
   mobile_scanner: ^6.0.0
 
+  # Image Picker — for avatar selection from gallery
+  image_picker: ^1.1.2
+
   # Models
   freezed_annotation: ^3.0.0
   json_annotation: ^4.9.0
