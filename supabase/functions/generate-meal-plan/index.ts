@@ -62,22 +62,21 @@ serve(async (req: Request) => {
   // 1. Auth: extract JWT from Authorization header
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: "Missing Authorization header" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+  const { data: { user }, error: authError } = await supabase.auth.getUser(
+    authHeader.replace("Bearer ", ""),
+  );
 
   if (authError || !user) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: "Unauthorized" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   // 2. Rate limit: check last generation timestamp from meal_plans table
@@ -91,16 +90,12 @@ serve(async (req: Request) => {
 
   if (lastPlan) {
     const lastGenTime = new Date(lastPlan.created_at);
-    const now = new Date();
     const hoursSinceLast =
-      (now.getTime() - lastGenTime.getTime()) / (1000 * 60 * 60);
+      (Date.now() - lastGenTime.getTime()) / (1000 * 60 * 60);
     if (hoursSinceLast < 24) {
       return new Response(
         JSON.stringify({ error: "Rate limit: 1 generation per day" }),
-        {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
   }
@@ -110,121 +105,113 @@ serve(async (req: Request) => {
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: "Invalid JSON body" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   const { weekStart, profile, inventory } = body;
 
-  // 4. Call OpenAI gpt-4o-mini with JSON mode
-  const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!openaiApiKey) {
-    return new Response(JSON.stringify({ error: "OpenAI API key not configured" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+  // 4. Call Gemini 2.0 Flash with JSON response schema
+  const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!geminiApiKey) {
+    return new Response(
+      JSON.stringify({ error: "Gemini API key not configured" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
-  const openaiResponse = await fetch(
-    "https://api.openai.com/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openaiApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `Eres un nutricionista experto. Genera un plan de comidas de 7 días en JSON.
+  const prompt = `Eres un nutricionista experto. Genera un plan de comidas de 7 días en JSON.
 Cada día debe tener exactamente 3 comidas (breakfast, lunch, dinner).
 Cada comida debe incluir:
-- name (string en español)
-- mealType (exactamente uno de: breakfast, lunch, dinner, snack)
-- calories (integer)
-- proteins (float en gramos)
-- carbs (float en gramos)
-- fats (float en gramos)
+- name (string en español, nombre del plato)
+- mealType (exactamente uno de: breakfast, lunch, dinner)
+- calories (integer, kilocalorías)
+- proteins (float, gramos de proteína)
+- carbs (float, gramos de carbohidratos)
+- fats (float, gramos de grasas)
 - tags (array de strings con ingredientes clave en español, mínimo 3)
 
-Formato de salida requerido:
+weekStart: ${weekStart}
+Restricciones dietéticas: ${profile.dietaryRestrictions.join(", ") || "ninguna"}
+Objetivo principal: ${profile.primaryGoal ?? "salud general"}
+Ingredientes disponibles en inventario: ${inventory.map((i) => i.name).join(", ") || "ninguno"}
+
+Respeta las restricciones dietéticas, usa ingredientes del inventario cuando sea posible.
+El plan debe ser nutricionalmente balanceado y variado. Usa fechas YYYY-MM-DD empezando desde ${weekStart}.
+
+Devuelve SOLO el JSON con este formato exacto:
 {
   "days": [
     {
       "date": "YYYY-MM-DD",
-      "meals": [...]
+      "meals": [
+        {
+          "name": "...",
+          "mealType": "breakfast",
+          "calories": 350,
+          "proteins": 15.0,
+          "carbs": 45.0,
+          "fats": 10.0,
+          "tags": ["huevo", "avena", "leche"]
+        }
+      ]
     }
   ]
-}
+}`;
 
-Respeta las restricciones dietéticas y usa los ingredientes del inventario cuando sea posible.
-El plan debe ser nutricionalmente balanceado y variado.`,
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              weekStart,
-              dietaryRestrictions: profile.dietaryRestrictions,
-              primaryGoal: profile.primaryGoal,
-              availableIngredients: inventory.map((i) => i.name),
-            }),
-          },
-        ],
+  const geminiUrl =
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+
+  const geminiResponse = await fetch(geminiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
         temperature: 0.7,
-        max_tokens: 4000,
-      }),
-    },
-  );
+        maxOutputTokens: 4096,
+      },
+    }),
+  });
 
-  if (!openaiResponse.ok) {
-    const errorBody = await openaiResponse.text();
-    console.error("OpenAI error:", errorBody);
-    return new Response(JSON.stringify({ error: "LLM service error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+  if (!geminiResponse.ok) {
+    const errorBody = await geminiResponse.text();
+    console.error("Gemini error:", errorBody);
+    return new Response(
+      JSON.stringify({ error: "LLM service error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
-  const llmData = await openaiResponse.json();
-  const rawContent = llmData.choices?.[0]?.message?.content;
+  const geminiData = await geminiResponse.json();
+  const rawContent =
+    geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!rawContent) {
-    return new Response(JSON.stringify({ error: "Empty LLM response" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: "Empty LLM response" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
-  // 5. Parse and validate minimal structure
+  // 5. Parse and validate structure
   let planJson: { days: Array<{ date: string; meals: unknown[] }> };
   try {
     planJson = JSON.parse(rawContent);
   } catch {
     return new Response(
       JSON.stringify({ error: "Invalid JSON from LLM" }),
-      {
-        status: 422,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
+      { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
-  if (
-    !planJson.days ||
-    !Array.isArray(planJson.days) ||
-    planJson.days.length !== 7
-  ) {
+  if (!planJson.days || !Array.isArray(planJson.days) || planJson.days.length !== 7) {
     return new Response(
-      JSON.stringify({ error: "Invalid LLM response structure: expected 7 days" }),
-      {
-        status: 422,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
+      JSON.stringify({ error: "Invalid LLM response: expected 7 days" }),
+      { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
@@ -239,10 +226,10 @@ El plan debe ser nutricionalmente balanceado y variado.`,
         id: crypto.randomUUID(),
         name: (meal.name as string) ?? "",
         mealType: (meal.mealType as MealResponse["mealType"]) ?? "breakfast",
-        calories: (meal.calories as number) ?? 0,
-        proteins: (meal.proteins as number) ?? 0,
-        carbs: (meal.carbs as number) ?? 0,
-        fats: (meal.fats as number) ?? 0,
+        calories: Number(meal.calories) || 0,
+        proteins: Number(meal.proteins) || 0,
+        carbs: Number(meal.carbs) || 0,
+        fats: Number(meal.fats) || 0,
         tags: Array.isArray(meal.tags) ? (meal.tags as string[]) : [],
         isCompleted: false,
       })),
