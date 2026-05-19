@@ -58,6 +58,7 @@ Future<void> main() async {
         productsBoxProvider.overrideWithValue(Hive.box('products')),
         shoppingListsBoxProvider.overrideWithValue(Hive.box('shopping_lists')),
         userPreferencesBoxProvider.overrideWithValue(Hive.box('user_preferences')),
+        mealPlansBoxProvider.overrideWithValue(Hive.box('meal_plans')),
       ],
       child: const App(),
     ),

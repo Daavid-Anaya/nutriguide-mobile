@@ -2,9 +2,9 @@ import 'package:fpdart/fpdart.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:nutriguide_mobile/core/error/failure.dart';
 import 'package:nutriguide_mobile/features/home/domain/home_repository.dart';
-import 'package:nutriguide_mobile/features/home/domain/meal.dart';
 import 'package:nutriguide_mobile/features/home/domain/meal_plan.dart';
 import 'package:nutriguide_mobile/features/home/domain/wellness_summary.dart';
+import 'package:nutriguide_mobile/features/meal_plan/domain/meal_plan_repository.dart';
 import 'package:nutriguide_mobile/features/profile/domain/profile_repository.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_repository.dart';
 
@@ -21,23 +21,26 @@ import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_list_re
 ///   Empty box → 0. Unknown/null grades are skipped.
 /// - [WellnessSummary.streak]: hardcoded stub (0) — no backend tracking.
 ///
-/// [getTodayMealPlan] returns a hardcoded stub [MealPlan] with 3 meals
-/// covering breakfast, lunch, and dinner.
+/// [getTodayMealPlan] delegates to [MealPlanRepository.getMealPlanForDate]
+/// for today's date — single source of truth for meal plan data (AD-71).
 ///
 /// All errors are wrapped in [Left(CacheFailure())].
-/// Spec: HOME-DATA-001 | Design: AD-28, AD-29, AD-34, AD-41, AD-50.
+/// Spec: HOME-DATA-001, HOME-INTEGRATION-001 | Design: AD-28, AD-29, AD-34, AD-41, AD-50, AD-71.
 class HomeRepositoryImpl implements HomeRepository {
   HomeRepositoryImpl({
     required ShoppingListRepository shoppingListRepo,
     required Box<dynamic> productsBox,
     required ProfileRepository profileRepo,
+    required MealPlanRepository mealPlanRepo,
   })  : _shoppingListRepo = shoppingListRepo,
         _productsBox = productsBox,
-        _profileRepo = profileRepo;
+        _profileRepo = profileRepo,
+        _mealPlanRepo = mealPlanRepo;
 
   final ShoppingListRepository _shoppingListRepo;
   final Box<dynamic> _productsBox;
   final ProfileRepository _profileRepo;
+  final MealPlanRepository _mealPlanRepo;
 
   /// Nutriscore grade → health score heuristic (AD-29).
   static const _nutriScoreMap = {
@@ -104,43 +107,13 @@ class HomeRepositoryImpl implements HomeRepository {
     return (scores.reduce((a, b) => a + b) / scores.length).round();
   }
 
+  /// Delegates to [MealPlanRepository.getMealPlanForDate] for today's plan.
+  ///
+  /// [HomeNotifier] is unchanged — this is a transparent pass-through (AD-71).
+  /// Returns [CacheFailure] when the user is unauthenticated or no plan
+  /// exists for today.
   @override
   Future<Either<Failure, MealPlan>> getTodayMealPlan() async {
-    return Right(MealPlan(
-      id: 'stub-today',
-      date: DateTime.now(),
-      meals: _stubMeals,
-    ));
+    return _mealPlanRepo.getMealPlanForDate(DateTime.now());
   }
-
-  /// Hardcoded stub meal plan covering breakfast, lunch, and dinner (AD-28).
-  ///
-  /// No image URLs — [CachedNetworkImage] will show fallback icon (AD-32 decision
-  /// at implementation time: null → offline-safe placeholder).
-  static final _stubMeals = [
-    const Meal(
-      id: 'meal-1',
-      name: 'Avena con frutas',
-      mealType: MealType.breakfast,
-      calories: 350,
-      tags: ['Alto en fibra'],
-      isCompleted: false,
-    ),
-    const Meal(
-      id: 'meal-2',
-      name: 'Ensalada mediterránea',
-      mealType: MealType.lunch,
-      calories: 480,
-      tags: ['Proteína', 'Bajo en grasas'],
-      isCompleted: false,
-    ),
-    const Meal(
-      id: 'meal-3',
-      name: 'Salmón con verduras',
-      mealType: MealType.dinner,
-      calories: 520,
-      tags: ['Omega-3', 'Proteína'],
-      isCompleted: false,
-    ),
-  ];
 }

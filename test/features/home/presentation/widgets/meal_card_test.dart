@@ -155,5 +155,52 @@ void main() {
         expect(find.text('Quinoa Bowl'), findsOneWidget);
       },
     );
+
+    // T-53: Macros row rendered when proteins/carbs/fats are non-null
+    // Spec: HOME-INTEGRATION-001 sc3 — MealCard shows macros when available
+    testWidgets(
+      'shows macros row text when proteins/carbs/fats are non-null',
+      (tester) async {
+        final mealWithMacros = _avocadoToast.copyWith(
+          proteins: 25.0,
+          carbs: 40.0,
+          fats: 10.0,
+        );
+        await pumpCard(tester, mealWithMacros);
+
+        // At least one macro label should be visible
+        expect(find.textContaining('P:'), findsOneWidget);
+        expect(find.textContaining('25'), findsAtLeast(1));
+      },
+    );
+
+    testWidgets(
+      'shows C: and F: labels in macros row',
+      (tester) async {
+        final mealWithMacros = _avocadoToast.copyWith(
+          proteins: 25.0,
+          carbs: 40.0,
+          fats: 10.0,
+        );
+        await pumpCard(tester, mealWithMacros);
+
+        expect(find.textContaining('C:'), findsOneWidget);
+        expect(find.textContaining('F:'), findsOneWidget);
+      },
+    );
+
+    // T-53: Macros row absent when all macros are null
+    // Spec: HOME-INTEGRATION-001 sc4 — MealCard hides macros when all null
+    testWidgets(
+      'macros row is absent when proteins, carbs, and fats are all null',
+      (tester) async {
+        // _avocadoToast has null proteins/carbs/fats by default
+        await pumpCard(tester, _avocadoToast);
+
+        expect(find.textContaining('P:'), findsNothing);
+        expect(find.textContaining('C:'), findsNothing);
+        expect(find.textContaining('F:'), findsNothing);
+      },
+    );
   });
 }

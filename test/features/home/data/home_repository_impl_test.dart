@@ -1,6 +1,7 @@
 // Spec: HOME-DATA-001 sc1–sc5
 // TDD: T-03 [RED] — Tests FAIL until home_repository_impl.dart is created (T-04).
 // TDD: T-19 [RED] — Tests for HomeRepositoryImpl budget wiring via ProfileRepository.
+// TDD: T-57 [RED] — Tests for HomeRepositoryImpl delegation to MealPlanRepository.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
@@ -9,6 +10,8 @@ import 'package:mocktail/mocktail.dart';
 import 'package:nutriguide_mobile/core/error/failure.dart';
 import 'package:nutriguide_mobile/features/home/data/home_repository_impl.dart';
 import 'package:nutriguide_mobile/features/home/domain/meal.dart';
+import 'package:nutriguide_mobile/features/home/domain/meal_plan.dart';
+import 'package:nutriguide_mobile/features/meal_plan/domain/meal_plan_repository.dart';
 import 'package:nutriguide_mobile/features/profile/domain/profile_repository.dart';
 import 'package:nutriguide_mobile/features/profile/domain/user_profile.dart';
 import 'package:nutriguide_mobile/features/shopping_list/domain/shopping_item.dart';
@@ -24,6 +27,8 @@ class _MockShoppingListRepo extends Mock
 class _MockBox extends Mock implements Box<dynamic> {}
 
 class _MockProfileRepository extends Mock implements ProfileRepository {}
+
+class _MockMealPlanRepository extends Mock implements MealPlanRepository {}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -53,26 +58,56 @@ void main() {
   late _MockShoppingListRepo mockShoppingListRepo;
   late _MockBox mockProductsBox;
   late _MockProfileRepository mockProfileRepo;
+  late _MockMealPlanRepository mockMealPlanRepo;
   late HomeRepositoryImpl repository;
 
   setUpAll(() {
     registerFallbackValue(
       const UserProfile(id: '', name: '', email: ''),
     );
+    registerFallbackValue(DateTime(2026));
   });
 
   setUp(() {
     mockShoppingListRepo = _MockShoppingListRepo();
     mockProductsBox = _MockBox();
     mockProfileRepo = _MockProfileRepository();
+    mockMealPlanRepo = _MockMealPlanRepository();
     // Default: profile returns no groceryBudget → budgetTotal falls back to 200.0
     when(() => mockProfileRepo.getProfile()).thenAnswer(
       (_) async => const Right(UserProfile(id: '', name: 'Usuario', email: '')),
+    );
+    // Default: MealPlanRepository returns a stub MealPlan for any date
+    when(() => mockMealPlanRepo.getMealPlanForDate(any())).thenAnswer(
+      (_) async => Right(
+        MealPlan(
+          id: 'delegated-today',
+          date: DateTime(2026, 5, 19),
+          meals: const [
+            Meal(
+              id: 'meal-d-1',
+              name: 'Delegated Breakfast',
+              mealType: MealType.breakfast,
+            ),
+            Meal(
+              id: 'meal-d-2',
+              name: 'Delegated Lunch',
+              mealType: MealType.lunch,
+            ),
+            Meal(
+              id: 'meal-d-3',
+              name: 'Delegated Dinner',
+              mealType: MealType.dinner,
+            ),
+          ],
+        ),
+      ),
     );
     repository = HomeRepositoryImpl(
       shoppingListRepo: mockShoppingListRepo,
       productsBox: mockProductsBox,
       profileRepo: mockProfileRepo,
+      mealPlanRepo: mockMealPlanRepo,
     );
   });
 
@@ -283,49 +318,80 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // HOME-DATA-001 sc4 — getTodayMealPlan returns 3 stub meals
+  // HOME-DATA-001 sc4 — getTodayMealPlan delegates to MealPlanRepository (AD-71)
   // ---------------------------------------------------------------------------
   group('getTodayMealPlan', () {
-    test('sc4 — returns Right(MealPlan) with exactly 3 meals', () async {
-      final result = await repository.getTodayMealPlan();
+    // T-57: sc4 — delegation to MealPlanRepository (HOME-INTEGRATION-001 sc2)
+    test(
+      'T-57 — delegates to MealPlanRepository.getMealPlanForDate(today)',
+      () async {
+        final result = await repository.getTodayMealPlan();
 
-      expect(result.isRight(), isTrue);
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (plan) {
-          expect(plan.meals, hasLength(3));
-        },
-      );
-    });
+        // Verify the call was delegated to MealPlanRepository
+        verify(() => mockMealPlanRepo.getMealPlanForDate(any())).called(1);
 
-    test('sc4 — meal types are breakfast, lunch, and dinner', () async {
-      final result = await repository.getTodayMealPlan();
+        expect(result.isRight(), isTrue);
+        result.fold(
+          (_) => fail('Expected Right but got Left'),
+          (plan) {
+            expect(plan.id, equals('delegated-today'));
+          },
+        );
+      },
+    );
 
-      expect(result.isRight(), isTrue);
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (plan) {
-          final types = plan.meals.map((m) => m.mealType).toList();
-          expect(types, contains(MealType.breakfast));
-          expect(types, contains(MealType.lunch));
-          expect(types, contains(MealType.dinner));
-        },
-      );
-    });
+    test(
+      'T-57 — returns the same result from MealPlanRepository (Right pass-through)',
+      () async {
+        final result = await repository.getTodayMealPlan();
 
-    test('sc4 — all stub meals have non-empty names and are not completed', () async {
-      final result = await repository.getTodayMealPlan();
+        expect(result.isRight(), isTrue);
+        result.fold(
+          (_) => fail('Expected Right but got Left'),
+          (plan) {
+            expect(plan.meals, hasLength(3));
+            final types = plan.meals.map((m) => m.mealType).toList();
+            expect(types, contains(MealType.breakfast));
+            expect(types, contains(MealType.lunch));
+            expect(types, contains(MealType.dinner));
+          },
+        );
+      },
+    );
 
-      expect(result.isRight(), isTrue);
-      result.fold(
-        (_) => fail('Expected Right but got Left'),
-        (plan) {
-          for (final meal in plan.meals) {
-            expect(meal.name, isNotEmpty);
-            expect(meal.isCompleted, isFalse);
-          }
-        },
-      );
-    });
+    test(
+      'T-57 — propagates Left(CacheFailure) when MealPlanRepository fails',
+      () async {
+        when(() => mockMealPlanRepo.getMealPlanForDate(any())).thenAnswer(
+          (_) async => const Left(CacheFailure('No plan for today')),
+        );
+
+        final result = await repository.getTodayMealPlan();
+
+        expect(result.isLeft(), isTrue);
+        result.fold(
+          (failure) => expect(failure, isA<CacheFailure>()),
+          (_) => fail('Expected Left but got Right'),
+        );
+      },
+    );
+
+    test(
+      'T-57 — all delegated meals have non-empty names and are not completed',
+      () async {
+        final result = await repository.getTodayMealPlan();
+
+        expect(result.isRight(), isTrue);
+        result.fold(
+          (_) => fail('Expected Right but got Left'),
+          (plan) {
+            for (final meal in plan.meals) {
+              expect(meal.name, isNotEmpty);
+              expect(meal.isCompleted, isFalse);
+            }
+          },
+        );
+      },
+    );
   });
 }

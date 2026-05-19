@@ -33,3 +33,12 @@ class ApiFailure extends Failure {
 
   final int? statusCode;
 }
+
+/// Failure caused by an AI meal plan generation error.
+///
+/// Raised when both the Edge Function and the local fallback algorithm fail
+/// to produce a valid [WeeklyMealPlan]. Enables the UI to show a
+/// generation-specific error message distinct from generic network errors.
+class GenerationFailure extends Failure {
+  const GenerationFailure([super.message]);
+}

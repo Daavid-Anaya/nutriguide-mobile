@@ -18,6 +18,9 @@ abstract final class MealType {
 ///
 /// [mealType] should be one of the constants in [MealType].
 /// [calories] is nullable because calorie data may not be available for all meals.
+/// [proteins], [carbs], [fats] are nullable macronutrient values in grams (AD-64).
+/// Nullable to maintain backward compatibility — legacy rows without macro data
+/// deserialize safely with all three fields as null.
 @freezed
 abstract class Meal with _$Meal {
   const factory Meal({
@@ -25,6 +28,9 @@ abstract class Meal with _$Meal {
     required String name,
     required String mealType,
     int? calories,
+    double? proteins,
+    double? carbs,
+    double? fats,
     @Default([]) List<String> tags,
     @Default(false) bool isCompleted,
   }) = _Meal;

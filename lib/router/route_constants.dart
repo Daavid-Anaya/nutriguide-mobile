@@ -27,4 +27,13 @@ abstract final class Routes {
 
   /// Registration screen (outside the shell navigation).
   static const register = '/register';
+
+  /// Meal plan weekly view (outside the shell navigation — full-screen push).
+  /// Spec: HOME-INTEGRATION-001 | Design: AD-78, AD-79.
+  static const mealPlan = '/meal-plan';
+
+  /// Meal plan daily detail view.
+  /// The `:date` path parameter holds an ISO8601 date string (e.g. '2026-05-18').
+  /// Spec: MEAL-UI-005 | Design: AD-78.
+  static const mealPlanDay = '/meal-plan/:date';
 }

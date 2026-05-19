@@ -3,10 +3,23 @@ import 'dart:async';
 import 'package:mocktail/mocktail.dart';
 import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// FunctionsClient is re-exported from supabase_flutter (no separate import needed)
 
 // ── Client mocks ──────────────────────────────────────────────────────────
 class MockSupabaseClient extends Mock implements SupabaseClient {}
 class MockGoTrueClient extends Mock implements GoTrueClient {}
+
+// ── Edge Functions client mock ────────────────────────────────────────────
+/// Mock for [FunctionsClient] used to test [MealPlanGeneratorService].
+///
+/// Usage:
+/// ```dart
+/// final mockFunctions = MockFunctionsClient();
+/// when(() => mockClient.functions).thenReturn(mockFunctions);
+/// when(() => mockFunctions.invoke('generate-meal-plan', body: any(named: 'body')))
+///     .thenAnswer((_) async => FunctionResponse(data: {...}, status: 200));
+/// ```
+class MockFunctionsClient extends Mock implements FunctionsClient {}
 
 // ── Realtime mocks ───────────────────────────────────────────────────────
 class MockRealtimeChannel extends Mock implements RealtimeChannel {}

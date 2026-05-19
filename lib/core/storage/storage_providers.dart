@@ -76,3 +76,15 @@ final userPreferencesBoxProvider = Provider<Box<dynamic>>(
     'Call initStorage() in main() and override before runApp().',
   ),
 );
+
+/// Provides the Hive box used for offline-first meal plan caching.
+///
+/// Override in [ProviderScope] after [openHiveBoxes()] has been called.
+/// Key strategy: ISO-8601 date string of the week's Monday (e.g. "2026-05-18").
+/// Value: JSON-encoded [WeeklyMealPlan] string (consistent with AD-74).
+final mealPlansBoxProvider = Provider<Box<dynamic>>(
+  (ref) => throw UnimplementedError(
+    'mealPlansBoxProvider must be overridden in ProviderScope. '
+    'Call openHiveBoxes() in main() and override before runApp().',
+  ),
+);

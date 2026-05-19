@@ -108,6 +108,20 @@ class MealCard extends StatelessWidget {
             ),
           ),
         ],
+        // Macros row — only when at least one macro is non-null (AD-64)
+        if (meal.proteins != null ||
+            meal.carbs != null ||
+            meal.fats != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'P: ${meal.proteins?.toStringAsFixed(0) ?? '—'}g  '
+            'C: ${meal.carbs?.toStringAsFixed(0) ?? '—'}g  '
+            'F: ${meal.fats?.toStringAsFixed(0) ?? '—'}g',
+            style: context.textTheme.labelSmall?.copyWith(
+              color: context.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -6,6 +6,8 @@ import 'package:nutriguide_mobile/features/auth/presentation/providers/auth_noti
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nutriguide_mobile/features/auth/presentation/register_screen.dart';
 import 'package:nutriguide_mobile/features/home/presentation/home_screen.dart';
+import 'package:nutriguide_mobile/features/meal_plan/presentation/meal_plan_day_screen.dart';
+import 'package:nutriguide_mobile/features/meal_plan/presentation/meal_plan_screen.dart';
 import 'package:nutriguide_mobile/features/profile/presentation/profile_screen.dart';
 import 'package:nutriguide_mobile/features/scanner/presentation/product_detail_screen.dart';
 import 'package:nutriguide_mobile/features/scanner/presentation/scanner_screen.dart';
@@ -112,6 +114,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.register,
         builder: (_, _) => const RegisterScreen(),
+      ),
+
+      // Meal plan screens — full-screen push, outside the shell (AD-78).
+      // Navigate via context.push() to preserve shell state (AD-79).
+      GoRoute(
+        path: Routes.mealPlan,
+        builder: (_, _) => const MealPlanScreen(),
+      ),
+      GoRoute(
+        path: Routes.mealPlanDay,
+        builder: (_, state) => MealPlanDayScreen(
+          date: state.pathParameters['date']!,
+        ),
       ),
 
       // Shell with bottom navigation bar

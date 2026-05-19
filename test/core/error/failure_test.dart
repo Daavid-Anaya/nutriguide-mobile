@@ -11,6 +11,7 @@ void main() {
           CacheFailure() => 'cache',
           AuthFailure() => 'auth',
           ApiFailure() => 'api',
+          GenerationFailure() => 'generation',
         };
         expect(result, equals('network'));
       });
@@ -22,6 +23,7 @@ void main() {
           CacheFailure() => 'cache',
           AuthFailure() => 'auth',
           ApiFailure() => 'api',
+          GenerationFailure() => 'generation',
         };
         expect(result, equals('cache'));
       });
@@ -33,6 +35,7 @@ void main() {
           CacheFailure() => 'cache',
           AuthFailure() => 'auth',
           ApiFailure() => 'api',
+          GenerationFailure() => 'generation',
         };
         expect(result, equals('auth'));
       });
@@ -44,8 +47,21 @@ void main() {
           CacheFailure() => 'cache',
           AuthFailure() => 'auth',
           ApiFailure() => 'api',
+          GenerationFailure() => 'generation',
         };
         expect(result, equals('api'));
+      });
+
+      test('switch on GenerationFailure returns correct label', () {
+        const Failure failure = GenerationFailure('AI generation failed');
+        final result = switch (failure) {
+          NetworkFailure() => 'network',
+          CacheFailure() => 'cache',
+          AuthFailure() => 'auth',
+          ApiFailure() => 'api',
+          GenerationFailure() => 'generation',
+        };
+        expect(result, equals('generation'));
       });
     });
 

@@ -30,5 +30,6 @@ Future<void> openHiveBoxes() async {
     Hive.openBox<dynamic>('products'),
     Hive.openBox<dynamic>('shopping_lists'),
     Hive.openBox<dynamic>('user_preferences'),
+    Hive.openBox<dynamic>('meal_plans'),
   ]);
 }
